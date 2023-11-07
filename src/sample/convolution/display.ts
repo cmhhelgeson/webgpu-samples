@@ -1,38 +1,38 @@
 import { BindGroupCluster, Base2DRendererClass } from './utils';
-import gridDisplay from './gridDisplay.frag.wgsl';
+import display from './display.frag.wgsl';
 
-export default class GridDisplayRenderer extends Base2DRendererClass {
+export default class DisplayRenderer extends Base2DRendererClass {
   static sourceInfo = {
     name: __filename.substring(__dirname.length + 1),
     contents: __SOURCE__,
   };
 
   switchBindGroup: (name: string) => void;
-  computeBGDescript: BindGroupCluster;
+  bgCluster: BindGroupCluster;
 
   constructor(
     device: GPUDevice,
     presentationFormat: GPUTextureFormat,
     renderPassDescriptor: GPURenderPassDescriptor,
-    computeBGDescript: BindGroupCluster,
+    bgCluster: BindGroupCluster,
     label: string
   ) {
     super();
     this.renderPassDescriptor = renderPassDescriptor;
-    this.computeBGDescript = computeBGDescript;
+    this.bgCluster = bgCluster;
 
     this.pipeline = super.create2DRenderPipeline(
       device,
       label,
-      [this.computeBGDescript.bindGroupLayout],
-      gridDisplay,
+      [this.bgCluster.bindGroupLayout],
+      display,
       presentationFormat
     );
   }
 
   startRun(commandEncoder: GPUCommandEncoder) {
     super.executeRun(commandEncoder, this.renderPassDescriptor, this.pipeline, [
-      this.computeBGDescript.bindGroups[0],
+      this.bgCluster.bindGroups[0],
     ]);
   }
 }

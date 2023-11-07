@@ -1,8 +1,9 @@
-import gridDisplay from './gridDisplay.frag.wgsl';
+import display from './display.frag.wgsl';
 import fullscreenTexturedQuad from '../../shaders/fullscreenTexturedQuad.wgsl';
-import GridDisplayRenderer from './gridDisplay';
+import DisplayRenderer from './display';
+import initialWrite from './initialWrite.compute.wgsl';
 import { SampleInit, makeSample } from '../../components/SampleLayout';
-import { image_data } from './data';
+import { MnistData } from './data';
 import { createBindGroupCluster } from './utils';
 
 enum ActivationEnum {
@@ -47,7 +48,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     'Activation Function': 'RELU',
   };
 
-  const zeroImageData = image_data.mnist.data[0].image;
+  let rawNumberData = MnistData.data[settings.Value].image;
 
   const numberTextureSize: GPUExtent3DStrict = {
     width: 28,
@@ -55,10 +56,15 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     depthOrArrayLayers: 1,
   };
 
-  const numberStorageTexture = device.createTexture({
+  // Texture will be used as both writable 2d storage texture and input texture
+  // texture_2d<format, read_write> currently experimental
+  const numberTexture = device.createTexture({
     size: numberTextureSize,
     format: 'r32float',
-    usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING
+    usage:
+      GPUTextureUsage.STORAGE_BINDING |
+      GPUTextureUsage.TEXTURE_BINDING |
+      GPUTextureUsage.RENDER_ATTACHMENT,
   });
 
   const numberBuffer = device.createBuffer({
@@ -66,7 +72,10 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
       Float32Array.BYTES_PER_ELEMENT *
       numberTextureSize.width *
       numberTextureSize.height,
-    usage: GPUBufferUsage.COPY_SRC,
+    usage:
+      GPUBufferUsage.COPY_SRC |
+      GPUBufferUsage.STORAGE |
+      GPUBufferUsage.COPY_DST,
     mappedAtCreation: true,
   });
 
@@ -75,50 +84,106 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     minFilter: 'nearest',
   });
 
-  const grayscaleStorageTextureEntry: GPUBindGroupLayoutEntry = {
-    binding: 0,
-    visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT,
-    storageTexture: {
-      format: 'r32float',
-    }
-  }
-
-  const initialWriteBindGroupLayout = device.createBindGroupLayout({
-    label: 'InitialWrite.bindGroupLayout',
-    entries: [grayscaleStorageTextureEntry],
-  })
-
-  const initialWriteBindGroup = device.createBindGroup({
-    layout: initialWriteBindGroupLayout,
-    label: 'InitialWrite.bindGroup',
-    entries: [
+  const initialWriteBGCluster = createBindGroupCluster(
+    [0, 1],
+    [GPUShaderStage.COMPUTE, GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT],
+    ['buffer', 'storageTexture'],
+    [
+      { type: 'read-only-storage' },
       {
-        binding: 0,
-        resource: numberStorageTexture.createView(),
-      }
-    ]
-  })
+        format: numberTexture.format,
+        access: 'write-only',
+        viewDimension: '2d',
+      },
+    ],
+    [[{ buffer: numberBuffer }, numberTexture.createView()]],
+    'InitialWrite',
+    device
+  );
 
-  new Float32Array(numberBuffer.getMappedRange()).set(zeroImageData);
+  const initialWritePipeline = device.createComputePipeline({
+    label: 'InitialWrite.pipeline',
+    layout: device.createPipelineLayout({
+      bindGroupLayouts: [initialWriteBGCluster.bindGroupLayout],
+    }),
+    compute: {
+      entryPoint: 'initialWriteComputeMain',
+      module: device.createShaderModule({
+        code: initialWrite,
+      }),
+    },
+  });
+
+  new Float32Array(numberBuffer.getMappedRange()).set(rawNumberData);
   numberBuffer.unmap();
 
-  const commandEncoder = device.createCommandEncoder();
+  const initEncoder = device.createCommandEncoder();
+  const computePassEncoder = initEncoder.beginComputePass();
+  computePassEncoder.setPipeline(initialWritePipeline);
+  computePassEncoder.setBindGroup(0, initialWriteBGCluster.bindGroups[0]);
+  computePassEncoder.dispatchWorkgroups(7, 7);
+  computePassEncoder.end();
+  device.queue.submit([initEncoder.finish()]);
 
-  const bytesPerRow =
-    Math.ceil((28 * Float32Array.BYTES_PER_ELEMENT) / 256) * 256;
+  const displayBGCluster = createBindGroupCluster(
+    [0],
+    [GPUShaderStage.FRAGMENT],
+    ['texture'],
+    [{ viewDimension: '2d', sampleType: 'unfilterable-float' }],
+    [[numberTexture.createView()]],
+    'Display',
+    device
+  );
 
+  const renderPassDescriptor: GPURenderPassDescriptor = {
+    colorAttachments: [
+      {
+        view: undefined, // Assigned later
 
-  const commands = commandEncoder.finish();
-  device.queue.submit([commands]);
+        clearValue: { r: 0.1, g: 0.4, b: 0.5, a: 1.0 },
+        loadOp: 'clear',
+        storeOp: 'store',
+      },
+    ],
+  };
 
-  gui.add(settings, 'Value', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  const displayRenderer = new DisplayRenderer(
+    device,
+    presentationFormat,
+    renderPassDescriptor,
+    displayBGCluster,
+    'Display'
+  );
+
+  gui.add(settings, 'Value', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).onChange(() => {
+    rawNumberData = MnistData.data[settings.Value].image;
+    device.queue.writeBuffer(
+      numberBuffer,
+      0,
+      new Float32Array([...rawNumberData])
+    );
+
+    const commandEncoder = device.createCommandEncoder();
+    const computePassEncoder = commandEncoder.beginComputePass();
+    computePassEncoder.setPipeline(initialWritePipeline);
+    computePassEncoder.setBindGroup(0, initialWriteBGCluster.bindGroups[0]);
+    computePassEncoder.dispatchWorkgroups(7, 7);
+    computePassEncoder.end();
+    device.queue.submit([commandEncoder.finish()]);
+  });
   gui.add(settings, 'Input Shape');
   gui.add(settings, 'Output Shape');
   gui.add(settings, 'Stride');
 
   function frame() {
     if (!pageState.active) return;
+    renderPassDescriptor.colorAttachments[0].view = context
+      .getCurrentTexture()
+      .createView();
 
+    const commandEncoder = device.createCommandEncoder();
+    displayRenderer.startRun(commandEncoder);
+    device.queue.submit([commandEncoder.finish()]);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -135,14 +200,14 @@ const convolutionExample: () => JSX.Element = () =>
         name: __filename.substring(__dirname.length + 1),
         contents: __SOURCE__,
       },
-      GridDisplayRenderer.sourceInfo,
+      DisplayRenderer.sourceInfo,
       {
         name: '../../../shaders/fullscreenTexturedQuad.vert.wgsl',
         contents: fullscreenTexturedQuad,
       },
       {
-        name: './bitonicDisplay.frag.wgsl',
-        contents: gridDisplay,
+        name: './display.frag.wgsl',
+        contents: display,
       },
     ],
     filename: __filename,
