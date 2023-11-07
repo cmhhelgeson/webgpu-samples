@@ -1,7 +1,6 @@
 @group(0) @binding(0) var<storage, read> data: array<f32>
 @group(0) @binding(1) var<storage, write> outputTexture: texture_storage_2d<r32float, write>;
 
-
 // We will dispatch 7 workgroups
 @compute @workgroup_size(4, 4, 1)
 fn main(

@@ -75,13 +75,29 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     minFilter: 'nearest',
   });
 
-  const bgCluster = createBindGroupCluster(
-    [0, 1],
-    [GPUShaderStage.FRAGMENT, GPUShaderStage.FRAGMENT],
-    ['texture', 'sampler'],
-    [{type: ''}]
+  const grayscaleStorageTextureEntry: GPUBindGroupLayoutEntry = {
+    binding: 0,
+    visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT,
+    storageTexture: {
+      format: 'r32float',
+    }
+  }
 
-  )
+  const initialWriteBindGroupLayout = device.createBindGroupLayout({
+    label: 'InitialWrite.bindGroupLayout',
+    entries: [grayscaleStorageTextureEntry],
+  })
+
+  const initialWriteBindGroup = device.createBindGroup({
+    layout: initialWriteBindGroupLayout,
+    label: 'InitialWrite.bindGroup',
+    entries: [
+      {
+        binding: 0,
+        resource: numberStorageTexture.createView(),
+      }
+    ]
+  })
 
   new Float32Array(numberBuffer.getMappedRange()).set(zeroImageData);
   numberBuffer.unmap();
@@ -91,11 +107,6 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
   const bytesPerRow =
     Math.ceil((28 * Float32Array.BYTES_PER_ELEMENT) / 256) * 256;
 
-  commandEncoder.copyBufferToTexture(
-    { buffer: numberBuffer, bytesPerRow: bytesPerRow },
-    { texture: numberTexture, mipLevel: 0, origin: { x: 0, y: 0, z: 0 } },
-    numberTextureSize
-  );
 
   const commands = commandEncoder.finish();
   device.queue.submit([commands]);
