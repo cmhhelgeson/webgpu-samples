@@ -129,7 +129,12 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     [0],
     [GPUShaderStage.FRAGMENT],
     ['texture'],
-    [{ viewDimension: '2d', sampleType: 'unfilterable-float' }],
+    [
+      {
+        viewDimension: '2d',
+        sampleType: 'unfilterable-float',
+      },
+    ],
     [[numberTexture.createView()]],
     'Display',
     device
