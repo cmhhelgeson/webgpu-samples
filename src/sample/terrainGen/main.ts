@@ -2,20 +2,14 @@ import { mat4 } from 'wgpu-matrix';
 import { makeSample, SampleInit } from '../../components/SampleLayout';
 import { createMeshRenderable } from '../../meshes/mesh';
 import { createBoxMeshWithTangents } from '../../meshes/box';
-import heightsFromTexture from './heightsFromTexture.wgsl';
+import heightsFromTextureWGSL from './heightsFromTexture.wgsl';
 import {
   createBindGroupDescriptor,
   create3DRenderPipeline,
   createTextureFromImage,
   createBindGroupCluster,
 } from './utils';
-
-const MAT4X4_BYTES = 64;
-enum TextureAtlas {
-  Spiral,
-  Toybox,
-  BrickWall,
-}
+import { TerrainDescriptor } from './terrain';
 
 interface GUISettings {
   'Bump Mode':
@@ -28,10 +22,6 @@ interface GUISettings {
   cameraPosX: number;
   cameraPosY: number;
   cameraPosZ: number;
-  lightPosX: number;
-  lightPosY: number;
-  lightPosZ: number;
-  'Reset Light': () => void;
 }
 
 const init: SampleInit = async ({ canvas, pageState, gui }) => {
@@ -54,12 +44,6 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     cameraPosX: 0.0,
     cameraPosY: 0.8,
     cameraPosZ: -1.4,
-    lightPosX: 1.7,
-    lightPosY: 0.7,
-    lightPosZ: -1.9,
-    'Reset Light': () => {
-      return;
-    },
   };
 
   // Create normal mapping resources and pipeline
@@ -67,12 +51,6 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     size: [canvas.width, canvas.height],
     format: 'depth24plus',
     usage: GPUTextureUsage.RENDER_ATTACHMENT,
-  });
-
-  const uniformBuffer = device.createBuffer({
-    // Buffer holding projection, view, and model matrices plus padding bytes
-    size: MAT4X4_BYTES * 4,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
 
   let heightMapTexture: GPUTexture;
@@ -84,34 +62,17 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     heightMapTexture = createTextureFromImage(device, imageBitmap);
   }
 
-  console.log(heightMapTexture.width * heightMapTexture.height);
-
-  const heightsBufferSize =
-    heightMapTexture.width *
-    heightMapTexture.height *
-    Float32Array.BYTES_PER_ELEMENT;
-
-  const heightsOutputBuffer = device.createBuffer({
-    size: heightsBufferSize,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+  // Init shared properties across all terrain instances
+  TerrainDescriptor.initStaticProperties(device);
+  const terrainDescriptor = new TerrainDescriptor(device, {
+    heightmap: heightMapTexture,
   });
-
-  const heightsStatingBuffer = device.createBuffer({
-    size: heightsBufferSize,
-    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-  });
-
-  const heightsFromTextureBGCluster = createBindGroupCluster(
-    [0, 1, 2], 
-    [GPUShaderStage.COMPUTE],
-    ['buffer']
-  )
-
-  // Create a sampler with linear filtering for smooth interpolation.
-  const sampler = device.createSampler({
-    magFilter: 'linear',
-    minFilter: 'linear',
-  });
+  terrainDescriptor.setHeightsBuffer(device);
+  let heights: Float32Array;
+  await terrainDescriptor
+    .getHeights(device)
+    .then((result) => (heights = result));
+  console.log(heights);
 
   const renderPassDescriptor: GPURenderPassDescriptor = {
     colorAttachments: [
@@ -201,14 +162,6 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
       ...modelMatrix,
     ]);
 
-    device.queue.writeBuffer(
-      uniformBuffer,
-      0,
-      matrices.buffer,
-      matrices.byteOffset,
-      matrices.byteLength
-    );
-
     renderPassDescriptor.colorAttachments[0].view = context
       .getCurrentTexture()
       .createView();
@@ -236,7 +189,7 @@ const TerrainGen: () => JSX.Element = () =>
       },
       {
         name: './heightFromTexture.wgsl',
-        contents: heightsFromTexture,
+        contents: heightsFromTextureWGSL,
         editable: true,
       },
       {
