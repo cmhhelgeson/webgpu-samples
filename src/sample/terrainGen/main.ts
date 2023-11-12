@@ -3,13 +3,8 @@ import { makeSample, SampleInit } from '../../components/SampleLayout';
 import { createMeshRenderable } from '../../meshes/mesh';
 import { createBoxMeshWithTangents } from '../../meshes/box';
 import heightsFromTextureWGSL from './heightsFromTexture.wgsl';
-import {
-  createBindGroupDescriptor,
-  create3DRenderPipeline,
-  createTextureFromImage,
-  createBindGroupCluster,
-} from './utils';
-import { TerrainDescriptor } from './terrain';
+import { createBindGroupCluster } from './utils';
+import { createTerrainDescriptor, TerrainDescriptor } from './terrain';
 
 interface GUISettings {
   'Bump Mode':
@@ -46,32 +41,56 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     cameraPosZ: -1.4,
   };
 
-  // Create normal mapping resources and pipeline
-  const depthTexture = device.createTexture({
-    size: [canvas.width, canvas.height],
-    format: 'depth24plus',
-    usage: GPUTextureUsage.RENDER_ATTACHMENT,
-  });
-
+  let imageBitmap;
   let heightMapTexture: GPUTexture;
   {
-    const response = await fetch('../assets/img/terrain_heightmap.png');
-    const imageBitmap = await createImageBitmap(await response.blob());
-    console.log(imageBitmap.width);
-    console.log(imageBitmap.height);
-    heightMapTexture = createTextureFromImage(device, imageBitmap);
+    const response = await fetch('../assets/img/iceland_heightmap.png');
+    imageBitmap = await createImageBitmap(await response.blob());
+    console.log(imageBitmap);
+    heightMapTexture = device.createTexture({
+      size: {
+        width: imageBitmap.width,
+        height: imageBitmap.height,
+      },
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING,
+    });
   }
 
-  // Init shared properties across all terrain instances
-  TerrainDescriptor.initStaticProperties(device);
-  const terrainDescriptor = new TerrainDescriptor(device, {
+  // Create default terrain from heightmap
+  const terrainDescriptor: TerrainDescriptor = new TerrainDescriptor(device, {
     heightmap: heightMapTexture,
   });
-  terrainDescriptor.setHeightsBuffer(device);
-  let heights: Float32Array;
-  await terrainDescriptor
-    .getHeights(device)
-    .then((result) => (heights = result));
+  // Get size of heightmap
+  // Create stating for CPU Data (Feel free to do this in the GPU I could not get it to work)
+  let heights;
+  {
+    const offscreenCanvas = new OffscreenCanvas(
+      imageBitmap.width,
+      imageBitmap.height
+    );
+    const ctx = offscreenCanvas.getContext('2d');
+
+    // Draw the ImageBitmap onto the OffscreenCanvas
+    ctx.drawImage(imageBitmap, 0, 0);
+
+    // Get the image data from the OffscreenCanvas
+    const imageData = ctx.getImageData(
+      0,
+      0,
+      imageBitmap.width,
+      imageBitmap.height
+    );
+
+    // Create an ArrayBuffer to hold the normalized pixel data
+    const floatArray = new Float32Array(imageBitmap.width * imageBitmap.height);
+
+    // Convert and normalize pixel data (only getting r components)
+    for (let i = 0; i < imageData.data.length / 4; i++) {
+      floatArray[i] = imageData.data[i * 4] / 127.5; // Normalize to 0.0 - 1.0
+    }
+    heights = floatArray;
+  }
   console.log(heights);
 
   const renderPassDescriptor: GPURenderPassDescriptor = {
@@ -84,13 +103,6 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
         storeOp: 'store',
       },
     ],
-    depthStencilAttachment: {
-      view: depthTexture.createView(),
-
-      depthClearValue: 1.0,
-      depthLoadOp: 'clear',
-      depthStoreOp: 'store',
-    },
   };
 
   const aspect = canvas.width / canvas.height;
@@ -125,28 +137,6 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     'Parallax Scale',
     'Steep Parallax',
   ]);
-  const lightFolder = gui.addFolder('Light');
-  const depthFolder = gui.addFolder('Depth');
-  lightFolder.add(settings, 'Reset Light').onChange(() => {
-    lightPosXController.setValue(1.7);
-    lightPosYController.setValue(0.7);
-    lightPosZController.setValue(-1.9);
-    lightIntensityController.setValue(0.02);
-  });
-  const lightPosXController = lightFolder
-    .add(settings, 'lightPosX', -5, 5)
-    .step(0.1);
-  const lightPosYController = lightFolder
-    .add(settings, 'lightPosY', -5, 5)
-    .step(0.1);
-  const lightPosZController = lightFolder
-    .add(settings, 'lightPosZ', -5, 5)
-    .step(0.1);
-  const lightIntensityController = lightFolder
-    .add(settings, 'lightIntensity', 0.0, 0.1)
-    .step(0.002);
-  depthFolder.add(settings, 'depthScale', 0.0, 0.1).step(0.01);
-  depthFolder.add(settings, 'depthLayers', 1, 32).step(1);
 
   function frame() {
     if (!pageState.active) return;

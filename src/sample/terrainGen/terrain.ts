@@ -1,8 +1,3 @@
-import { createBindGroupCluster } from './utils';
-import heightsFromTextureWGSL from './heightsFromTexture.wgsl';
-
-import { Vec3 } from 'wgpu-matrix';
-
 // We're going to make our default sizes very friendly for the GPU
 // Later down the road we can add checks and conditionals for arbitrary sizes
 // But for now, 256 by 256 should be just fine, and it matches our heightmap dims
@@ -23,59 +18,9 @@ export class TerrainDescriptor {
   depth: number;
   tileSize: number;
   heightMap: GPUTexture;
-  setHeightsBindGroup: GPUBindGroup;
   vertexBuffer?: GPUBuffer;
   indexBuffer?: GPUBuffer;
   heightsBuffer?: GPUBuffer;
-
-  // Static properties
-  static setHeightsBGLayout: GPUBindGroupLayout;
-  static setHeightsPipeline: GPUComputePipeline;
-  static terrainUniformsBuffer: GPUBuffer;
-
-  static initStaticProperties(device: GPUDevice) {
-    TerrainDescriptor.setHeightsBGLayout = device.createBindGroupLayout({
-      label: `SetHeights.bindGroupLayout`,
-      entries: [
-        // Heightmap Texture
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          texture: {
-            viewDimension: '2d',
-          },
-        },
-        // Heights Storage Buffer
-        {
-          binding: 1,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'storage' },
-        },
-        // Uniforms Buffer
-        {
-          binding: 2,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'uniform' },
-        },
-      ],
-    });
-    TerrainDescriptor.terrainUniformsBuffer = device.createBuffer({
-      size: Float32Array.BYTES_PER_ELEMENT * 2,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    TerrainDescriptor.setHeightsPipeline = device.createComputePipeline({
-      layout: device.createPipelineLayout({
-        label: `SetHeights.pipelineLayout`,
-        bindGroupLayouts: [TerrainDescriptor.setHeightsBGLayout],
-      }),
-      compute: {
-        entryPoint: 'heightsFromTextureComputeMain',
-        module: device.createShaderModule({
-          code: heightsFromTextureWGSL,
-        }),
-      },
-    });
-  }
 
   constructor(device: GPUDevice, args: TerrainDescriptorConstructorArgs) {
     this.width = args.width ? args.width : DEFAULT_TERRAIN_WIDTH;
@@ -84,81 +29,12 @@ export class TerrainDescriptor {
     this.heightMap = args.heightmap;
     this.heightsBuffer = device.createBuffer({
       size: Float32Array.BYTES_PER_ELEMENT * this.width * this.depth,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
     });
-    this.setHeightsBindGroup = device.createBindGroup({
-      layout: TerrainDescriptor.setHeightsBGLayout,
-      entries: [
-        {
-          binding: 0,
-          resource: this.heightMap.createView(),
-        },
-        {
-          binding: 1,
-          resource: {
-            buffer: this.heightsBuffer,
-          },
-        },
-        {
-          binding: 2,
-          resource: {
-            buffer: TerrainDescriptor.terrainUniformsBuffer,
-          },
-        },
-      ],
-    });
-  }
-
-  setHeightsBuffer(device: GPUDevice) {
-    device.queue.writeBuffer(
-      TerrainDescriptor.terrainUniformsBuffer,
-      0,
-      new Float32Array([this.width, this.depth])
-    );
-    const commandEncoder = device.createCommandEncoder();
-    const computePassEncoder = commandEncoder.beginComputePass();
-    computePassEncoder.setPipeline(TerrainDescriptor.setHeightsPipeline);
-    computePassEncoder.setBindGroup(0, this.setHeightsBindGroup);
-    // Texture height is 65536 (make caluclations for different texture sizes later)
-    // We can address each pixel with 16x16 invocations and 16x16 workgroups
-    computePassEncoder.dispatchWorkgroups(16, 16, 1);
-    computePassEncoder.end();
-    device.queue.submit([commandEncoder.finish()]);
-  }
-
-  async getHeights(device: GPUDevice): Promise<Float32Array> {
-    const heightsBufferSize =
-      Float32Array.BYTES_PER_ELEMENT * this.width * this.depth;
-    const heightsStagingBuffer = device.createBuffer({
-      size: Float32Array.BYTES_PER_ELEMENT * this.width * this.depth,
-      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-    });
-    const commandEncoder = device.createCommandEncoder();
-    commandEncoder.copyBufferToBuffer(
-      this.heightsBuffer,
-      0,
-      heightsStagingBuffer,
-      0,
-      heightsBufferSize
-    );
-    await heightsStagingBuffer.mapAsync(GPUMapMode.READ, 0, heightsBufferSize);
-    const copyHeightsBuffer = heightsStagingBuffer.getMappedRange(
-      0,
-      heightsBufferSize
-    );
-    // Get correct range of data from CPU copy of GPU Data
-    const heightsData = copyHeightsBuffer.slice(
-      0,
-      Float32Array.BYTES_PER_ELEMENT * this.width * this.depth
-    );
-    // Extract data
-    const heightsOutput = new Float32Array(heightsData);
-    heightsStagingBuffer.unmap();
-    return heightsOutput;
   }
 }
 
-const calculateWeightedVectorMagnitude = (
+/*const calculateWeightedVectorMagnitude = (
   p: Vec3,
   xAxis: number,
   yAxis: number,
@@ -220,75 +96,4 @@ interface ClipVolume {
   y1: number;
   z0: number;
   z1: number;
-}
-
-// Get the raw values of the pixels in each heightmap as a linear array of values
-export const setHeightFromHeightmap = (
-  device: GPUDevice,
-  terrains: TerrainDescriptor
-) => {
-  // Get size of heightMap (currently assuming static size)
-  const heightsBufferSize =
-    heightmaps[0].width * heightmaps[0].height * Float32Array.BYTES_PER_ELEMENT;
-
-  // Get shader GPU output buffer, staging buffer, and uniforms buffer
-  const heightsOutputBuffer = device.createBuffer({
-    size: heightsBufferSize,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  });
-
-  const heightsStagingBuffer = device.createBuffer({
-    size: heightsBufferSize,
-    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-  });
-
-  const terrainUniformsBuffer = device.createBuffer({
-    size: Float32Array.BYTES_PER_ELEMENT * 2,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
-
-  const heightsFromTextureLabel = 'HeightsFromTexture';
-
-  const bgResources = heightmaps.map((hm) => {
-    return [
-      hm.createView(),
-      { buffer: heightsOutputBuffer },
-      { buffer: terrainUniformsBuffer },
-    ];
-  });
-
-  const heightsFromTextureBGCluster = createBindGroupCluster(
-    [0, 1, 2],
-    [GPUShaderStage.COMPUTE],
-    ['texture', 'buffer', 'buffer'],
-    [{ viewDimension: '2d' }, { type: 'storage' }, { type: 'uniform' }],
-    bgResources,
-    heightsFromTextureLabel,
-    device
-  );
-
-  const heightsFromTexturePipeline = device.createComputePipeline({
-    layout: device.createPipelineLayout({
-      label: `${heightsFromTextureLabel}.pipelineLayout`,
-      bindGroupLayouts: [heightsFromTextureBGCluster.bindGroupLayout],
-    }),
-    compute: {
-      entryPoint: 'heightsFromTextureComputeMain',
-      module: device.createShaderModule({
-        code: heightsFromTextureWGSL,
-      }),
-    },
-  });
-
-  for (let i = 0; i < heightmaps.length; i++) {
-    const commandEncoder = device.createCommandEncoder();
-    const computePassEncoder = commandEncoder.beginComputePass();
-    computePassEncoder.setBindGroup(
-      0,
-      heightsFromTextureBGCluster.bindGroups[i]
-    );
-    // Texture height is 65536 (make caluclations for different texture sizes later)
-    // We can address each pixel with 16x16 invocations and 16x16 workgroups
-    computePassEncoder.dispatchWorkgroups(16, 16, 1);
-  }
-};
+} */
