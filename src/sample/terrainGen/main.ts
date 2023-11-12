@@ -91,7 +91,52 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     }
     heights = floatArray;
   }
-  console.log(heights);
+
+  const getTerrain = (t: TerrainDescriptor, w: number, d: number) => {
+    return heights[w * t.depth + d];
+  };
+
+  const calculateNormal = (t: TerrainDescriptor, x: number, z: number) => {
+    x = x === 0 ? 1 : x;
+    z = z === 0 ? 1 : z;
+    const hl: number = getTerrain(t, x - 1, z);
+    const hr: number = getTerrain(t, x + 1, z);
+    const hd: number = getTerrain(t, x, z + 1); /* Terrain expands towards -Z */
+    const hu: number = getTerrain(t, x, z - 1);
+    const normal = [hl - hr, 2.0, hd - hu];
+    const magnitude =
+      normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2];
+    normal[0] /= magnitude;
+    normal[1] /= magnitude;
+    normal[2] /= magnitude;
+    return normal;
+  };
+
+  const vertNormalBuffer = [];
+
+  for (let wSeg = 0; wSeg < terrainDescriptor.width; wSeg++) {
+    for (let dSeg = 0; dSeg < terrainDescriptor.depth; dSeg++) {
+      const py = getTerrain(terrainDescriptor, wSeg, dSeg);
+      const vertex = [
+        wSeg * terrainDescriptor.tileSize,
+        vy,
+        -dSeg * terrainDescriptor.tileSize,
+      ];
+      const normal = calculateNormal(t, wSeg, dSeg);
+      vertNormalBuffer.push(...vertex);
+      vertNormalBuffer.push(...normal);
+    }
+  }
+
+  // Create indices
+  const numIndices =
+    (terrainDescriptor.width - 1) * (terrainDescriptor.depth * 2) +
+    (terrainDescriptor.width - 2) +
+    (terrainDescriptor.depth - 2);
+  terrainDescriptor.indexBuffer = device.createBuffer({
+    size: Uint16Array.BYTES_PER_ELEMENT * numIndices,
+    usage: GPUBufferUsage.INDEX,
+  });
 
   const renderPassDescriptor: GPURenderPassDescriptor = {
     colorAttachments: [
