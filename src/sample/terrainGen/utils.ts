@@ -146,7 +146,9 @@ export const create3DRenderPipeline = (
   presentationFormat: GPUTextureFormat,
   depthTest = false,
   topology: GPUPrimitiveTopology = 'triangle-list',
-  cullMode: GPUCullMode = 'back'
+  cullMode: GPUCullMode = 'back',
+  // WebGPU default is ccw
+  windingOrder: GPUFrontFace = 'ccw',
 ) => {
   const pipelineDescriptor: GPURenderPipelineDescriptor = {
     label: `${label}.pipeline`,
@@ -178,6 +180,7 @@ export const create3DRenderPipeline = (
     primitive: {
       topology: topology,
       cullMode: cullMode,
+      frontFace: windingOrder,
     },
   };
   if (depthTest) {

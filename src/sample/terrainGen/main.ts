@@ -1,23 +1,14 @@
 import { mat4 } from 'wgpu-matrix';
 import { makeSample, SampleInit } from '../../components/SampleLayout';
 import { createMeshRenderable } from '../../meshes/mesh';
-import { createBoxMeshWithTangents } from '../../meshes/box';
 import heightsFromTextureWGSL from './heightsFromTexture.wgsl';
-import { createBindGroupCluster } from './utils';
-import { createTerrainDescriptor, TerrainDescriptor } from './terrain';
-
-interface GUISettings {
-  'Bump Mode':
-    | 'Diffuse Texture'
-    | 'Normal Texture'
-    | 'Depth Texture'
-    | 'Normal Map'
-    | 'Parallax Scale'
-    | 'Steep Parallax';
-  cameraPosX: number;
-  cameraPosY: number;
-  cameraPosZ: number;
-}
+import { create3DRenderPipeline, createBindGroupCluster } from './utils';
+import {
+  createTerrainMesh,
+  getHeightsFromTexture,
+  TerrainDescriptor,
+} from './terrain';
+import terrainWGSL from './terrain.wgsl';
 
 const init: SampleInit = async ({ canvas, pageState, gui }) => {
   const adapter = await navigator.gpu.requestAdapter();
@@ -34,109 +25,90 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     alphaMode: 'premultiplied',
   });
 
-  const settings: GUISettings = {
-    'Bump Mode': 'Normal Map',
+  const settings = {
     cameraPosX: 0.0,
     cameraPosY: 0.8,
     cameraPosZ: -1.4,
+    lightPosX: 1.7,
+    lightPosY: 0.7,
+    lightPosZ: -1.9,
+    lightIntensity: 0.02,
   };
 
-  let imageBitmap;
-  let heightMapTexture: GPUTexture;
-  {
-    const response = await fetch('../assets/img/iceland_heightmap.png');
-    imageBitmap = await createImageBitmap(await response.blob());
-    console.log(imageBitmap);
-    heightMapTexture = device.createTexture({
-      size: {
-        width: imageBitmap.width,
-        height: imageBitmap.height,
-      },
-      format: 'rgba8unorm',
-      usage: GPUTextureUsage.TEXTURE_BINDING,
-    });
-  }
-
-  // Create default terrain from heightmap
-  const terrainDescriptor: TerrainDescriptor = new TerrainDescriptor(device, {
-    heightmap: heightMapTexture,
+  const depthTexture = device.createTexture({
+    size: [canvas.width, canvas.height],
+    format: 'depth24plus',
+    usage: GPUTextureUsage.RENDER_ATTACHMENT,
   });
-  // Get size of heightmap
-  // Create stating for CPU Data (Feel free to do this in the GPU I could not get it to work)
-  let heights;
+  
+  let heights: Float32Array;
   {
-    const offscreenCanvas = new OffscreenCanvas(
-      imageBitmap.width,
-      imageBitmap.height
-    );
-    const ctx = offscreenCanvas.getContext('2d');
-
-    // Draw the ImageBitmap onto the OffscreenCanvas
-    ctx.drawImage(imageBitmap, 0, 0);
-
-    // Get the image data from the OffscreenCanvas
-    const imageData = ctx.getImageData(
-      0,
-      0,
-      imageBitmap.width,
-      imageBitmap.height
-    );
-
-    // Create an ArrayBuffer to hold the normalized pixel data
-    const floatArray = new Float32Array(imageBitmap.width * imageBitmap.height);
-
-    // Convert and normalize pixel data (only getting r components)
-    for (let i = 0; i < imageData.data.length / 4; i++) {
-      floatArray[i] = imageData.data[i * 4] / 127.5; // Normalize to 0.0 - 1.0
-    }
+    const response = await fetch('../assets/heightmap.save');
+    const buffer = await response.arrayBuffer();
+    const floatArray = new Float32Array(buffer);
     heights = floatArray;
   }
 
-  const getTerrain = (t: TerrainDescriptor, w: number, d: number) => {
-    return heights[w * t.depth + d];
-  };
+  // Assuming heightmap is square
+  const terrainSize = Math.sqrt(heights.length);
+  console.log(terrainSize);
 
-  const calculateNormal = (t: TerrainDescriptor, x: number, z: number) => {
-    x = x === 0 ? 1 : x;
-    z = z === 0 ? 1 : z;
-    const hl: number = getTerrain(t, x - 1, z);
-    const hr: number = getTerrain(t, x + 1, z);
-    const hd: number = getTerrain(t, x, z + 1); /* Terrain expands towards -Z */
-    const hu: number = getTerrain(t, x, z - 1);
-    const normal = [hl - hr, 2.0, hd - hu];
-    const magnitude =
-      normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2];
-    normal[0] /= magnitude;
-    normal[1] /= magnitude;
-    normal[2] /= magnitude;
-    return normal;
-  };
-
-  const vertNormalBuffer = [];
-
-  for (let wSeg = 0; wSeg < terrainDescriptor.width; wSeg++) {
-    for (let dSeg = 0; dSeg < terrainDescriptor.depth; dSeg++) {
-      const py = getTerrain(terrainDescriptor, wSeg, dSeg);
-      const vertex = [
-        wSeg * terrainDescriptor.tileSize,
-        vy,
-        -dSeg * terrainDescriptor.tileSize,
-      ];
-      const normal = calculateNormal(t, wSeg, dSeg);
-      vertNormalBuffer.push(...vertex);
-      vertNormalBuffer.push(...normal);
-    }
-  }
-
-  // Create indices
-  const numIndices =
-    (terrainDescriptor.width - 1) * (terrainDescriptor.depth * 2) +
-    (terrainDescriptor.width - 2) +
-    (terrainDescriptor.depth - 2);
-  terrainDescriptor.indexBuffer = device.createBuffer({
-    size: Uint16Array.BYTES_PER_ELEMENT * numIndices,
-    usage: GPUBufferUsage.INDEX,
+  const vertexBuffer = device.createBuffer({
+    size: Float32Array.BYTES_PER_ELEMENT * 3 * heights.length,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE,
   });
+
+  let heightBitmap;
+  {
+    const response = await fetch('../assets/img/iceland_heightmap.png');
+    heightBitmap = await createImageBitmap(await response.blob());
+  }
+  // Create default terrain from heightmap
+  const terrainDescriptor: TerrainDescriptor = new TerrainDescriptor({});
+  const heightsTest = getHeightsFromTexture(device, heightBitmap, 'CPU');
+  const terrainMesh = createTerrainMesh(terrainDescriptor, heightsTest);
+  const terrainRenderable = createMeshRenderable(
+    device,
+    terrainMesh,
+    false,
+    false
+  );
+
+  const spaceUniformsBuffer = device.createBuffer({
+    size: Float32Array.BYTES_PER_ELEMENT * 16 * 4,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+
+  const lightUniformsBuffer = device.createBuffer({
+    size: Float32Array.BYTES_PER_ELEMENT * 4,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+
+  // Uniform bindGroups and bindGroupLayout
+  const frameBGDescriptor = createBindGroupCluster(
+    [0, 1],
+    [
+      GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+      GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX,
+    ],
+    ['buffer', 'buffer'],
+    [{ type: 'uniform' }, { type: 'uniform' }],
+    [[{ buffer: spaceUniformsBuffer }, { buffer: lightUniformsBuffer }]],
+    'Frame',
+    device
+  );
+
+  const terrainPipeline = create3DRenderPipeline(
+    device,
+    'TerrainRenderer',
+    [frameBGDescriptor.bindGroupLayout],
+    terrainWGSL,
+    // Position,   normal
+    ['float32x3', 'float32x3'],
+    terrainWGSL,
+    presentationFormat,
+    true,
+  );
 
   const renderPassDescriptor: GPURenderPassDescriptor = {
     colorAttachments: [
@@ -148,6 +120,13 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
         storeOp: 'store',
       },
     ],
+    depthStencilAttachment: {
+      view: depthTexture.createView(),
+
+      depthClearValue: 1.0,
+      depthLoadOp: 'clear',
+      depthStoreOp: 'store',
+    },
   };
 
   const aspect = canvas.width / canvas.height;
@@ -174,15 +153,6 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     return modelMatrix;
   }
 
-  gui.add(settings, 'Bump Mode', [
-    'Diffuse Texture',
-    'Normal Texture',
-    'Depth Texture',
-    'Normal Map',
-    'Parallax Scale',
-    'Steep Parallax',
-  ]);
-
   function frame() {
     if (!pageState.active) return;
 
@@ -197,12 +167,36 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
       ...modelMatrix,
     ]);
 
+    device.queue.writeBuffer(
+      spaceUniformsBuffer,
+      0,
+      matrices.buffer,
+      matrices.byteOffset,
+      matrices.byteLength
+    );
+
+    device.queue.writeBuffer(
+      lightUniformsBuffer,
+      0,
+      new Float32Array([
+        settings.lightPosX,
+        settings.lightPosY,
+        settings.lightPosZ,
+        settings.lightIntensity,
+      ])
+    );
+
     renderPassDescriptor.colorAttachments[0].view = context
       .getCurrentTexture()
       .createView();
 
     const commandEncoder = device.createCommandEncoder();
     const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
+    passEncoder.setPipeline(terrainPipeline);
+    passEncoder.setBindGroup(0, frameBGDescriptor.bindGroups[0]);
+    passEncoder.setVertexBuffer(0, terrainRenderable.vertexBuffer);
+    passEncoder.setIndexBuffer(terrainRenderable.indexBuffer, 'uint16');
+    passEncoder.drawIndexed(terrainRenderable.indexCount);
     passEncoder.end();
     device.queue.submit([commandEncoder.finish()]);
 
