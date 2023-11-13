@@ -1,14 +1,16 @@
-import { mat4 } from 'wgpu-matrix';
+import { mat4, vec3 } from 'wgpu-matrix';
 import { makeSample, SampleInit } from '../../components/SampleLayout';
 import { createMeshRenderable } from '../../meshes/mesh';
 import heightsFromTextureWGSL from './heightsFromTexture.wgsl';
-import { create3DRenderPipeline, createBindGroupCluster } from './utils';
+import { create3DRenderPipeline, createBindGroupCluster, createVBuffer } from './utils';
 import {
   createTerrainMesh,
-  getHeightsFromTexture,
+  //getHeightsFromTexture,
   TerrainDescriptor,
 } from './terrain';
 import terrainWGSL from './terrain.wgsl';
+import { WASDCamera } from '../cameras/camera';
+import { createInputHandler } from '../cameras/input';
 
 const init: SampleInit = async ({ canvas, pageState, gui }) => {
   const adapter = await navigator.gpu.requestAdapter();
@@ -26,21 +28,27 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
   });
 
   const settings = {
-    cameraPosX: 0.0,
-    cameraPosY: 0.8,
-    cameraPosZ: -1.4,
+    cameraPosX: 231,
+    cameraPosY: 180,
+    cameraPosZ: 109,
     lightPosX: 1.7,
     lightPosY: 0.7,
     lightPosZ: -1.9,
     lightIntensity: 0.02,
   };
 
-  const depthTexture = device.createTexture({
-    size: [canvas.width, canvas.height],
-    format: 'depth24plus',
-    usage: GPUTextureUsage.RENDER_ATTACHMENT,
+  // Create camera
+  const inputHandler = createInputHandler(window);
+  const camera = new WASDCamera({
+    position: vec3.create(
+      settings.cameraPosX,
+      settings.cameraPosY,
+      settings.cameraPosZ
+    ),
+    target: vec3.create(0, 0, 0),
   });
-  
+
+  // Create terrain
   let heights: Float32Array;
   {
     const response = await fetch('../assets/heightmap.save');
@@ -52,21 +60,12 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
   // Assuming heightmap is square
   const terrainSize = Math.sqrt(heights.length);
   console.log(terrainSize);
-
-  const vertexBuffer = device.createBuffer({
-    size: Float32Array.BYTES_PER_ELEMENT * 3 * heights.length,
-    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE,
-  });
-
-  let heightBitmap;
-  {
-    const response = await fetch('../assets/img/iceland_heightmap.png');
-    heightBitmap = await createImageBitmap(await response.blob());
-  }
   // Create default terrain from heightmap
-  const terrainDescriptor: TerrainDescriptor = new TerrainDescriptor({});
-  const heightsTest = getHeightsFromTexture(device, heightBitmap, 'CPU');
-  const terrainMesh = createTerrainMesh(terrainDescriptor, heightsTest);
+  const terrainDescriptor: TerrainDescriptor = new TerrainDescriptor({
+    width: terrainSize,
+    depth: terrainSize,
+  });
+  const terrainMesh = createTerrainMesh(terrainDescriptor, heights);
   const terrainRenderable = createMeshRenderable(
     device,
     terrainMesh,
@@ -75,7 +74,8 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
   );
 
   const spaceUniformsBuffer = device.createBuffer({
-    size: Float32Array.BYTES_PER_ELEMENT * 16 * 4,
+    // mat4x4f
+    size: 64 * 2,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
 
@@ -98,17 +98,51 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     device
   );
 
-  const terrainPipeline = create3DRenderPipeline(
-    device,
-    'TerrainRenderer',
-    [frameBGDescriptor.bindGroupLayout],
-    terrainWGSL,
-    // Position,   normal
-    ['float32x3', 'float32x3'],
-    terrainWGSL,
-    presentationFormat,
-    true,
-  );
+  const terrainPipelineVBuffers = createVBuffer(terrainMesh.vertexLayout);
+  console.log(terrainPipelineVBuffers);
+  const terrainPipeline = device.createRenderPipeline({
+    label: 'TerrainRenderer.pipeline',
+    layout: device.createPipelineLayout({
+      bindGroupLayouts: [frameBGDescriptor.bindGroupLayout],
+    }),
+    vertex: {
+      entryPoint: 'vertexMain',
+      buffers: [terrainPipelineVBuffers],
+      module: device.createShaderModule({
+        label: 'TerrainRenderer.vertexShader',
+        code: terrainWGSL,
+      }),
+    },
+    fragment: {
+      module: device.createShaderModule({
+        label: `TerrainRenderer.fragmentShader`,
+        code: terrainWGSL,
+      }),
+      entryPoint: 'fragmentMain',
+      targets: [
+        {
+          format: presentationFormat,
+        },
+      ],
+    },
+    primitive: {
+      topology: 'triangle-list',
+      cullMode: 'back',
+      frontFace: 'cw',
+    },
+    depthStencil: {
+      depthCompare: 'less',
+      depthWriteEnabled: true,
+      format: 'depth24plus',
+    },
+  });
+
+  // Create Render Pass Descriptor
+  const depthTexture = device.createTexture({
+    size: [canvas.width, canvas.height],
+    format: 'depth24plus',
+    usage: GPUTextureUsage.RENDER_ATTACHMENT,
+  });
 
   const renderPassDescriptor: GPURenderPassDescriptor = {
     colorAttachments: [
@@ -134,45 +168,41 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     (2 * Math.PI) / 5,
     aspect,
     0.1,
-    10.0
+    1000.0
   ) as Float32Array;
 
-  function getViewMatrix() {
-    return mat4.lookAt(
-      [settings.cameraPosX, settings.cameraPosY, settings.cameraPosZ],
-      [0, 0, 0],
-      [0, 1, 0]
-    );
-  }
+  const getViewMatrix = (deltaTime: number) => {
+    return camera.update(deltaTime * 10, inputHandler()) as Float32Array;
+  };
 
-  function getModelMatrix() {
-    const modelMatrix = mat4.create();
-    mat4.identity(modelMatrix);
-    const now = Date.now() / 1000;
-    mat4.rotateY(modelMatrix, now * -0.5, modelMatrix);
-    return modelMatrix;
-  }
+  gui.add(settings, 'cameraPosX', -100, 100);
+  gui.add(settings, 'cameraPosY', -100, 100);
+  gui.add(settings, 'cameraPosZ', -100, 100);
 
+  let lastFrameMS = 0;
   function frame() {
     if (!pageState.active) return;
+    const now = Date.now();
+    const deltaTime = (now - lastFrameMS) / 1000;
+    lastFrameMS = now;
 
-    // Write to normal map shader
-    const viewMatrix = getViewMatrix();
-
-    const modelMatrix = getModelMatrix();
-
-    const matrices = new Float32Array([
-      ...projectionMatrix,
-      ...viewMatrix,
-      ...modelMatrix,
-    ]);
+    // Write to terrain shader
+    const viewMatrix = getViewMatrix(deltaTime);
 
     device.queue.writeBuffer(
       spaceUniformsBuffer,
       0,
-      matrices.buffer,
-      matrices.byteOffset,
-      matrices.byteLength
+      projectionMatrix.buffer,
+      projectionMatrix.byteOffset,
+      projectionMatrix.byteLength
+    );
+
+    device.queue.writeBuffer(
+      spaceUniformsBuffer,
+      64,
+      viewMatrix.buffer,
+      viewMatrix.byteOffset,
+      viewMatrix.byteLength
     );
 
     device.queue.writeBuffer(
@@ -195,8 +225,8 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     passEncoder.setPipeline(terrainPipeline);
     passEncoder.setBindGroup(0, frameBGDescriptor.bindGroups[0]);
     passEncoder.setVertexBuffer(0, terrainRenderable.vertexBuffer);
-    passEncoder.setIndexBuffer(terrainRenderable.indexBuffer, 'uint16');
-    passEncoder.drawIndexed(terrainRenderable.indexCount);
+    //passEncoder.setIndexBuffer(terrainRenderable.indexBuffer, 'uint16');
+    passEncoder.draw(terrainSize * terrainSize);
     passEncoder.end();
     device.queue.submit([commandEncoder.finish()]);
 

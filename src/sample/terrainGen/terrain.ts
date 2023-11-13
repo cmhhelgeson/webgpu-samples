@@ -4,6 +4,7 @@
 import { createBindGroupCluster } from './utils';
 import heightsFromTextureWGSL from './heightsFromTexture.wgsl';
 import { Mesh } from '../../meshes/mesh';
+import { vec3 } from 'wgpu-matrix';
 
 // But for now, 256 by 256 should be just fine, and it matches our heightmap dims
 export const DEFAULT_TERRAIN_WIDTH = 256;
@@ -11,8 +12,8 @@ export const DEFAULT_TERRAIN_DEPTH = 256;
 export const DEFAULT_TERRAIN_TILE_SIZE = 0.5;
 
 interface TerrainDescriptorConstructorArgs {
-  width?: number;
-  depth?: number;
+  width: number;
+  depth: number;
   tileSize?: number;
 }
 
@@ -23,9 +24,9 @@ export class TerrainDescriptor {
   tileSize: number;
 
   constructor(args: TerrainDescriptorConstructorArgs) {
-    this.width = args.width ? args.width : DEFAULT_TERRAIN_WIDTH;
-    this.depth = args.depth ? args.depth : DEFAULT_TERRAIN_DEPTH;
-    this.tileSize = args.tileSize ? args.tileSize : DEFAULT_TERRAIN_TILE_SIZE;
+    this.width = args.width;
+    this.depth = args.depth;
+    this.tileSize = args.tileSize;
   }
 }
 
@@ -131,14 +132,44 @@ const getHeightsGPU = async (device: GPUDevice, bitmap: ImageBitmap) => {
   computePassEncoder.end();
   device.queue.submit([commandEncoder.finish()]);
 
-  //Commandencoder.copyBuffer
+  //Commandencoder.copyBuffer ..etc
 };
+//  Example 3x3 Terrain Grid
+//                      ____________________________
+//                     /         /       /         /
+//                   /         /       /         /
+//                 /         /       /         /
+//                _____________________________
+//              /         /        /         /
+//            /         /        /         /
+//          /         /        /         /   ^
+//        /_____________________________    /
+//       /        /         /         /    z (depth)
+//     /        /         /         /     /
+//   /        /         /         /      /
+// /________/_________/_________/
+//        <--- x (width) --->
 
 export const createTerrainMesh = (
   t: TerrainDescriptor,
   heights: Float32Array
 ): Mesh => {
-  const getTerrain = (w: number, d: number) => {
+  // position: vec3f
+  const f32sPerVertex = 3;
+  const verticesTemp = [];
+  console.log(t.width * t.depth * 3);
+  const vertexStride = Float32Array.BYTES_PER_ELEMENT * f32sPerVertex;
+  const vertexLayout: GPUVertexFormat[] = ['float32x3'];
+
+  let index = 0;
+  for (let z = 0; z < t.depth; z++) {
+    for (let x = 0; x < t.width; x++) {
+      const position = vec3.create(x, heights[z * t.width + x], z);
+      verticesTemp.push(...position);
+    }
+  }
+  const vertices = new Float32Array(verticesTemp);
+  /*const getTerrain = (w: number, d: number) => {
     return heights[w * t.depth + d];
   };
 
@@ -147,7 +178,7 @@ export const createTerrainMesh = (
     z = z === 0 ? 1 : z;
     const hl: number = getTerrain(x - 1, z);
     const hr: number = getTerrain(x + 1, z);
-    const hd: number = getTerrain(x, z + 1); /* Terrain expands towards -Z */
+    const hd: number = getTerrain(x, z + 1); // Terrain expands towards -Z 
     const hu: number = getTerrain(x, z - 1);
     const normal = [hl - hr, 2.0, hd - hu];
     const magnitude =
@@ -170,16 +201,11 @@ export const createTerrainMesh = (
       0
     );
 
-    /* Z1 is always largest, because our terrain grows towrds -Z, it means that
-     * it defines the min_row
-     */
     const minRow = Math.max(Math.min(-z1 / t.tileSize, t.depth - 1), 0);
     const maxRow = Math.max(
       Math.min(-(z0 - t.tileSize) / t.tileSize, t.depth - 1),
       0
     );
-
-    /* If this happens then the terrain is not visible */
     if (minCol == maxCol || minRow == maxRow) {
       return;
     }
@@ -187,20 +213,11 @@ export const createTerrainMesh = (
     let index = 0;
     for (let c = minCol; c <= maxCol; c++) {
       for (let r = minRow; r <= maxRow; r++) {
-        /* If this is not the first strip then we need to produce a degenerate
-         * link with the previous strip using the first vertex from this strip
-         * and the last vertex from the last before we start recording the
-         * new strip. Here is the first vertex of this strip.
-         */
         if (c > minCol && r == minRow) indices[index++] = c * t.depth + r;
 
         indices[index++] = c * t.depth + r;
         indices[index++] = (c + 1) * t.depth + r;
 
-        /* Link the next triangle strip using degenerate triangles. For that
-         * we need to duplicate the last vertex of this strip and the first
-         * vertex of the next.
-         */
         if (r == maxRow && c < maxCol) indices[index++] = (c + 1) * t.depth + r;
       }
     }
@@ -220,12 +237,13 @@ export const createTerrainMesh = (
   const numIndices =
     (t.width - 1) * (t.depth * 2) + (t.width - 2) + (t.depth - 2);
   const indices = new Uint16Array(numIndices);
-  populateIndices(indices);
+  populateIndices(indices); */
 
   const terrainMesh: Mesh = {
-    vertices: new Float32Array(vertNormalBuffer),
-    vertexStride: Float32Array.BYTES_PER_ELEMENT * 3 * 2,
-    indices: indices,
+    vertices,
+    vertexStride,
+    indices: new Uint16Array(),
+    vertexLayout,
   };
   return terrainMesh;
 };

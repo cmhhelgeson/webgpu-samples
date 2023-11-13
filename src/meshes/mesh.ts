@@ -6,12 +6,14 @@ export interface Renderable {
   indexBuffer: GPUBuffer;
   indexCount: number;
   bindGroup?: GPUBindGroup;
+  vertexLayout?: GPUVertexFormat[],
 }
 
 export interface Mesh {
   vertices: Float32Array;
   indices: Uint16Array | Uint32Array;
   vertexStride: number;
+  vertexLayout?: GPUVertexFormat[],
 }
 
 /**
