@@ -35,6 +35,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     lightPosY: 0.7,
     lightPosZ: -1.9,
     lightIntensity: 0.02,
+    scalingFactor: 0.0,
   };
 
   // Create camera
@@ -80,7 +81,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
   });
 
   const lightUniformsBuffer = device.createBuffer({
-    size: Float32Array.BYTES_PER_ELEMENT * 4,
+    size: Float32Array.BYTES_PER_ELEMENT * 5,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
 
@@ -98,44 +99,19 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     device
   );
 
-  const terrainPipelineVBuffers = createVBuffer(terrainMesh.vertexLayout);
-  console.log(terrainPipelineVBuffers);
-  const terrainPipeline = device.createRenderPipeline({
-    label: 'TerrainRenderer.pipeline',
-    layout: device.createPipelineLayout({
-      bindGroupLayouts: [frameBGDescriptor.bindGroupLayout],
-    }),
-    vertex: {
-      entryPoint: 'vertexMain',
-      buffers: [terrainPipelineVBuffers],
-      module: device.createShaderModule({
-        label: 'TerrainRenderer.vertexShader',
-        code: terrainWGSL,
-      }),
-    },
-    fragment: {
-      module: device.createShaderModule({
-        label: `TerrainRenderer.fragmentShader`,
-        code: terrainWGSL,
-      }),
-      entryPoint: 'fragmentMain',
-      targets: [
-        {
-          format: presentationFormat,
-        },
-      ],
-    },
-    primitive: {
-      topology: 'triangle-list',
-      cullMode: 'back',
-      frontFace: 'cw',
-    },
-    depthStencil: {
-      depthCompare: 'less',
-      depthWriteEnabled: true,
-      format: 'depth24plus',
-    },
-  });
+  const terrainPipeline = create3DRenderPipeline(
+    device,
+    'TerrainRenderer',
+    [frameBGDescriptor.bindGroupLayout],
+    terrainWGSL,
+    terrainMesh.vertexLayout,
+    terrainWGSL,
+    presentationFormat,
+    true,
+    'triangle-list',
+    'back',
+    'cw'
+  );
 
   // Create Render Pass Descriptor
   const depthTexture = device.createTexture({
@@ -178,6 +154,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
   gui.add(settings, 'cameraPosX', -100, 100);
   gui.add(settings, 'cameraPosY', -100, 100);
   gui.add(settings, 'cameraPosZ', -100, 100);
+  gui.add(settings, 'scalingFactor', 0.0, 3.0).step(0.1);
 
   let lastFrameMS = 0;
   function frame() {
@@ -213,6 +190,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
         settings.lightPosY,
         settings.lightPosZ,
         settings.lightIntensity,
+        settings.scalingFactor,
       ])
     );
 
@@ -225,8 +203,8 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     passEncoder.setPipeline(terrainPipeline);
     passEncoder.setBindGroup(0, frameBGDescriptor.bindGroups[0]);
     passEncoder.setVertexBuffer(0, terrainRenderable.vertexBuffer);
-    //passEncoder.setIndexBuffer(terrainRenderable.indexBuffer, 'uint16');
-    passEncoder.draw(terrainSize * terrainSize);
+    passEncoder.setIndexBuffer(terrainRenderable.indexBuffer, 'uint16');
+    passEncoder.drawIndexed(terrainRenderable.indexCount);
     passEncoder.end();
     device.queue.submit([commandEncoder.finish()]);
 

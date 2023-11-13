@@ -8,6 +8,7 @@ struct LightUniforms {
   light_pos_y: f32,
   light_pos_z: f32,
   light_intensity: f32,
+  scaling_factor: f32,
 }
 
 struct VertexInput {
@@ -17,6 +18,22 @@ struct VertexInput {
 
 struct VertexOutput {
   @builtin(position) Position : vec4f,
+  @location(0) posWS: vec3f,
+}
+
+fn inverseLerp(val: f32, minVal: f32, maxVal: f32) -> f32 {
+  return (val - minVal) / (maxVal - minVal);
+}
+
+fn remap(
+  val: f32,
+  inputMin: f32,
+  inputMax: f32,
+  outputMin: f32,
+  outputMax: f32,
+) -> f32 {
+  var t: f32 = inverseLerp(val, inputMin, inputMax);
+  return mix(outputMin, outputMax, t);
 }
 
 // Uniforms
@@ -29,8 +46,10 @@ fn vertexMain(input: VertexInput) -> VertexOutput {
   // Create the View Projection Matrix
   let VP = space_uniforms.proj_matrix * space_uniforms.view_matrix;
   
+  let posY = input.position.y * light_uniforms.scaling_factor;
   // Get Clip space transforms and pass through values out of the way
-  output.Position = VP * input.position;
+  output.Position = VP * vec4f(input.position.x, posY, input.position.z, input.position.w);
+  output.posWS = input.position.xyz;
 
   return output;
 }
@@ -40,6 +59,6 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
   // Get position, direction, and distance of light in tangent space (no need to multiply by model matrix as there is no model)
   //let normal = normalize(input.normal);
   //let lightDir = normalize(input.light_ws - input.pos_ws);
-  //let diffuseLight = max(dot(normal, lightDir), 0.0) * vec3f(255.0, 255.0, 255.0);
-  return vec4f(35.0, 255.0, 255.0, 1.0);
+  let color = input.posWS.y / 200.0;
+  return vec4f(vec3f(color), 1.0);
 }

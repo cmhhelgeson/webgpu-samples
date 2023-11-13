@@ -6,11 +6,6 @@ import heightsFromTextureWGSL from './heightsFromTexture.wgsl';
 import { Mesh } from '../../meshes/mesh';
 import { vec3 } from 'wgpu-matrix';
 
-// But for now, 256 by 256 should be just fine, and it matches our heightmap dims
-export const DEFAULT_TERRAIN_WIDTH = 256;
-export const DEFAULT_TERRAIN_DEPTH = 256;
-export const DEFAULT_TERRAIN_TILE_SIZE = 0.5;
-
 interface TerrainDescriptorConstructorArgs {
   width: number;
   depth: number;
@@ -156,93 +151,58 @@ export const createTerrainMesh = (
 ): Mesh => {
   // position: vec3f
   const f32sPerVertex = 3;
-  const verticesTemp = [];
-  console.log(t.width * t.depth * 3);
+  const vertices = new Float32Array(t.width * t.depth * f32sPerVertex);
   const vertexStride = Float32Array.BYTES_PER_ELEMENT * f32sPerVertex;
   const vertexLayout: GPUVertexFormat[] = ['float32x3'];
 
-  let index = 0;
+  let positionIndex = 0;
   for (let z = 0; z < t.depth; z++) {
     for (let x = 0; x < t.width; x++) {
-      const position = vec3.create(x, heights[z * t.width + x], z);
-      verticesTemp.push(...position);
+      vertices[positionIndex++] = x;
+      vertices[positionIndex++] = heights[z * t.width + x];
+      vertices[positionIndex++] = z;
     }
   }
-  const vertices = new Float32Array(verticesTemp);
-  /*const getTerrain = (w: number, d: number) => {
-    return heights[w * t.depth + d];
-  };
-
-  const calculateNormal = (x: number, z: number) => {
-    x = x === 0 ? 1 : x;
-    z = z === 0 ? 1 : z;
-    const hl: number = getTerrain(x - 1, z);
-    const hr: number = getTerrain(x + 1, z);
-    const hd: number = getTerrain(x, z + 1); // Terrain expands towards -Z 
-    const hu: number = getTerrain(x, z - 1);
-    const normal = [hl - hr, 2.0, hd - hu];
-    const magnitude =
-      normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2];
-    normal[0] /= magnitude;
-    normal[1] /= magnitude;
-    normal[2] /= magnitude;
-    return normal;
-  };
-
-  const populateIndices = (indices: Uint16Array) => {
-    const x0 = 0.0;
-    const x1 = (t.width - 1) * t.tileSize;
-    const z0 = 0.0;
-    const z1 = (t.depth - 1) * DEFAULT_TERRAIN_TILE_SIZE;
-
-    const minCol = Math.max(Math.min(x0 / t.tileSize, t.width - 2), 0);
-    const maxCol = Math.max(
-      Math.min((x1 + t.tileSize) / t.tileSize, t.width - 2),
-      0
-    );
-
-    const minRow = Math.max(Math.min(-z1 / t.tileSize, t.depth - 1), 0);
-    const maxRow = Math.max(
-      Math.min(-(z0 - t.tileSize) / t.tileSize, t.depth - 1),
-      0
-    );
-    if (minCol == maxCol || minRow == maxRow) {
-      return;
-    }
-
-    let index = 0;
-    for (let c = minCol; c <= maxCol; c++) {
-      for (let r = minRow; r <= maxRow; r++) {
-        if (c > minCol && r == minRow) indices[index++] = c * t.depth + r;
-
-        indices[index++] = c * t.depth + r;
-        indices[index++] = (c + 1) * t.depth + r;
-
-        if (r == maxRow && c < maxCol) indices[index++] = (c + 1) * t.depth + r;
-      }
-    }
-  };
-
-  const vertNormalBuffer: number[] = [];
-
-  for (let wSeg = 0; wSeg < t.width; wSeg++) {
-    for (let dSeg = 0; dSeg < t.depth; dSeg++) {
-      const py = getTerrain(wSeg, dSeg);
-      const vertex = [wSeg * t.tileSize, py, -dSeg * t.tileSize];
-      const normal = calculateNormal(wSeg, dSeg);
-      vertNormalBuffer.push(...vertex);
-      vertNormalBuffer.push(...normal);
-    }
-  }
-  const numIndices =
-    (t.width - 1) * (t.depth * 2) + (t.width - 2) + (t.depth - 2);
+  const numQuads = (t.width - 1) * (t.depth - 1);
+  const numIndices = numQuads * 6;
   const indices = new Uint16Array(numIndices);
-  populateIndices(indices); */
+  let indicesIndex = 0;
+  //  (z+1)*w+x        (z+1)*w+x+1   3                 4                  5
+  //    __________________           __________________ __________________
+  //   |                /           |                 ||                 |
+  //   |            /    |          |                 ||                 |
+  //   |        /        |          |                 ||                 |
+  //   |     /           |          |                 ||                 |
+  //   |  /              |          |                 ||                 |
+  //   |_________________|          |_________________||_________________|
+  //  z*w+x         (z+1)*w+x       0                  1                  2
+  //
+  for (let z = 0; z < t.depth - 1; z++) {
+    for (let x = 0; x < t.width - 1; x++) {
+      const nextZ = z + 1;
+      const nextX = x + 1;
+
+      const bottomLeft = z * t.width + x;
+      const topLeft = nextZ * t.width + x;
+      const topRight = nextZ * t.width + nextX;
+      const bottomRight = z * t.width + nextX;
+
+      // Left triangle
+      indices[indicesIndex++] = bottomLeft;
+      indices[indicesIndex++] = topLeft;
+      indices[indicesIndex++] = topRight;
+
+      // Right triangle
+      indices[indicesIndex++] = bottomLeft;
+      indices[indicesIndex++] = topRight;
+      indices[indicesIndex++] = bottomRight;
+    }
+  }
 
   const terrainMesh: Mesh = {
     vertices,
     vertexStride,
-    indices: new Uint16Array(),
+    indices,
     vertexLayout,
   };
   return terrainMesh;
