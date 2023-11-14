@@ -24,14 +24,20 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
   });
 
   const settings = {
-    cameraPosX: 231,
-    cameraPosY: 180,
-    cameraPosZ: 109,
+    cameraPosX: 67,
+    cameraPosY: 370,
+    cameraPosZ: 429,
     lightPosX: 1.7,
     lightPosY: 0.7,
     lightPosZ: -1.9,
     lightIntensity: 0.02,
-    scalingFactor: 0.0,
+    scaleY: 2.4,
+    worldScale: 8.0,
+    'Log Camera': () => {
+      console.log(camera.position);
+      console.log(camera.yaw);
+      console.log(camera.pitch);
+    },
   };
 
   // Create camera
@@ -45,6 +51,9 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     target: vec3.create(0, 0, 0),
   });
 
+  camera.yaw = -2.24;
+  camera.pitch = 0.07079;
+
   // Create terrain
   let heights: Float32Array;
   {
@@ -54,11 +63,8 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     heights = floatArray;
   }
 
-  console.log(heights);
-
   // Assuming heightmap is square
   const terrainSize = Math.sqrt(heights.length);
-  console.log(terrainSize);
   // Create default terrain from heightmap
   const terrainDescriptor: TerrainDescriptor = new TerrainDescriptor({
     width: terrainSize,
@@ -79,7 +85,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
   });
 
   const lightUniformsBuffer = device.createBuffer({
-    size: Float32Array.BYTES_PER_ELEMENT * 5,
+    size: Float32Array.BYTES_PER_ELEMENT * 6,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
 
@@ -152,7 +158,11 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
   gui.add(settings, 'cameraPosX', -100, 100);
   gui.add(settings, 'cameraPosY', -100, 100);
   gui.add(settings, 'cameraPosZ', -100, 100);
-  gui.add(settings, 'scalingFactor', 0.0, 3.0).step(0.1);
+  gui.add(settings, 'scaleY', 0.0, 3.0).step(0.1);
+  gui.add(settings, 'worldScale', 1.0, 10.0).step(0.1);
+  gui.add(settings, 'Log Camera').onChange(() => {
+
+  })
 
   let lastFrameMS = 0;
   function frame() {
@@ -188,7 +198,8 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
         settings.lightPosY,
         settings.lightPosZ,
         settings.lightIntensity,
-        settings.scalingFactor,
+        settings.scaleY,
+        settings.worldScale,
       ])
     );
 

@@ -27,6 +27,17 @@ export default interface Input {
 // InputHandler is a function that when called, returns the current Input state.
 export type InputHandler = () => Input;
 
+const isOverGUI = (event: MouseEvent) => {
+  let underHover = document.elementFromPoint(event.clientX, event.clientY);
+  while (underHover) {
+    if (underHover.classList.contains('dg')) {
+      return true;
+    }
+    underHover = underHover.parentElement;
+  }
+  return false;
+}
+
 // createInputHandler returns an InputHandler by attaching event handlers to the window.
 export function createInputHandler(window: Window): InputHandler {
   const digital = {
@@ -91,7 +102,7 @@ export function createInputHandler(window: Window): InputHandler {
   });
   window.addEventListener('mousemove', (e) => {
     mouseDown = (e.buttons & 1) !== 0;
-    if (mouseDown) {
+    if (mouseDown && !isOverGUI(e)) {
       analog.x += e.movementX;
       analog.y += e.movementY;
     }

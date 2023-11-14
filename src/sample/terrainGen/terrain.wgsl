@@ -9,6 +9,7 @@ struct LightUniforms {
   light_pos_z: f32,
   light_intensity: f32,
   scaling_factor: f32,
+  world_scale: f32,
 }
 
 struct VertexInput {
@@ -46,10 +47,14 @@ fn vertexMain(input: VertexInput) -> VertexOutput {
   // Create the View Projection Matrix
   let VP = space_uniforms.proj_matrix * space_uniforms.view_matrix;
   
-  let posY = input.position.y * light_uniforms.scaling_factor;
+  let newPosition = vec3f(
+    input.position.x * light_uniforms.world_scale,
+    input.position.y * light_uniforms.scaling_factor,
+    input.position.z * light_uniforms.world_scale
+  );
   // Get Clip space transforms and pass through values out of the way
-  output.Position = VP * vec4f(input.position.x, posY, input.position.z, input.position.w);
-  output.posWS = input.position.xyz;
+  output.posWS = newPosition.xyz;
+  output.Position = VP * vec4f(newPosition, 1.0);
 
   return output;
 }

@@ -102,9 +102,9 @@ class CameraBase {
 // WASDCamera is a camera implementation that behaves similar to first-person-shooter PC games.
 export class WASDCamera extends CameraBase implements Camera {
   // The camera absolute pitch angle
-  private pitch = 0;
+  pitch_ = 0;
   // The camera absolute yaw angle
-  private yaw = 0;
+  yaw_ = 0;
 
   // The movement veloicty
   private readonly velocity_ = vec3.create();
@@ -162,19 +162,19 @@ export class WASDCamera extends CameraBase implements Camera {
       (positive ? 1 : 0) - (negative ? 1 : 0);
 
     // Apply the delta rotation to the pitch and yaw angles
-    this.yaw -= input.analog.x * deltaTime * this.rotationSpeed;
-    this.pitch -= input.analog.y * deltaTime * this.rotationSpeed;
+    this.yaw_ -= input.analog.x * deltaTime * this.rotationSpeed;
+    this.pitch_ -= input.analog.y * deltaTime * this.rotationSpeed;
 
     // Wrap yaw between [0° .. 360°], just to prevent large accumulation.
-    this.yaw = mod(this.yaw, Math.PI * 2);
+    this.yaw_ = mod(this.yaw_, Math.PI * 2);
     // Clamp pitch between [-90° .. +90°] to prevent somersaults.
-    this.pitch = clamp(this.pitch, -Math.PI / 2, Math.PI / 2);
+    this.pitch_ = clamp(this.pitch_, -Math.PI / 2, Math.PI / 2);
 
     // Save the current position, as we're about to rebuild the camera matrix.
     const position = vec3.copy(this.position);
 
     // Reconstruct the camera's rotation, and store into the camera matrix.
-    super.matrix = mat4.rotateX(mat4.rotationY(this.yaw), this.pitch);
+    super.matrix = mat4.rotateX(mat4.rotationY(this.yaw_), this.pitch_);
 
     // Calculate the new target velocity
     const digital = input.digital;
@@ -205,8 +205,24 @@ export class WASDCamera extends CameraBase implements Camera {
 
   // Recalculates the yaw and pitch values from a directional vector
   recalculateAngles(dir: Vec3) {
-    this.yaw = Math.atan2(dir[0], dir[2]);
-    this.pitch = -Math.asin(dir[1]);
+    this.yaw_ = Math.atan2(dir[0], dir[2]);
+    this.pitch_ = -Math.asin(dir[1]);
+  }
+
+  get pitch() {
+    return this.pitch_;
+  }
+
+  set pitch(newPitch: number) {
+    this.pitch_ = newPitch;
+  }
+
+  get yaw() {
+    return this.yaw_;
+  }
+
+  set yaw(newYaw: number) {
+    this.yaw_ = newYaw;
   }
 }
 
