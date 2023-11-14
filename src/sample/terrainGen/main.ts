@@ -7,6 +7,7 @@ import { createTerrainMesh, TerrainDescriptor } from '../../meshes/terrain';
 import terrainWGSL from './terrain.wgsl';
 import { WASDCamera } from '../cameras/camera';
 import { createInputHandler } from '../cameras/input';
+import { createFaultFormation } from './terrain';
 
 const init: SampleInit = async ({ canvas, pageState, gui }) => {
   const adapter = await navigator.gpu.requestAdapter();
@@ -31,8 +32,13 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     lightPosY: 0.7,
     lightPosZ: -1.9,
     lightIntensity: 0.02,
-    scaleY: 2.4,
-    worldScale: 8.0,
+    'Height Scale': 2.4,
+    'World Scale': 8.0,
+    'Fault Iterations': 50,
+    'Fault Min Height': 0,
+    'Fault Max Height': 50,
+    'Erosion Filter': 0.4,
+    'Topology Mode': 'line-list',
     'Log Camera': () => {
       console.log(camera.position);
       console.log(camera.yaw);
@@ -63,19 +69,43 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     heights = floatArray;
   }
 
-  // Assuming heightmap is square
+  // Create terrainSize and heightOffsets array from original heights
+  // (Size of terrain assumed to be square for now)
   const terrainSize = Math.sqrt(heights.length);
+  const heightOffsets = new Float32Array(heights.length);
+  const heightOffsetsBuffer = device.createBuffer({
+    size: Float32Array.BYTES_PER_ELEMENT * heights.length,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
   // Create default terrain from heightmap
   const terrainDescriptor: TerrainDescriptor = new TerrainDescriptor({
     width: terrainSize,
     depth: terrainSize,
   });
   const terrainMesh = createTerrainMesh(terrainDescriptor, heights);
+  // Create terrain fault formations
   const terrainRenderable = createMeshRenderable(
     device,
     terrainMesh,
     false,
     false
+  );
+
+  console.log(terrainDescriptor.width);
+  createFaultFormation({
+    heightOffsets,
+    terrainSize: terrainDescriptor.width,
+    iterations: settings['Fault Iterations'],
+    minHeight: settings['Fault Min Height'],
+    maxHeight: settings['Fault Max Height'],
+  });
+
+  device.queue.writeBuffer(
+    heightOffsetsBuffer,
+    0,
+    heightOffsets.buffer,
+    heightOffsets.byteOffset,
+    heightOffsets.byteLength
   );
 
   const spaceUniformsBuffer = device.createBuffer({
@@ -103,16 +133,40 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     device
   );
 
-  const terrainPipeline = create3DRenderPipeline(
+  const storageBGDescriptor = createBindGroupCluster(
+    [0],
+    [GPUShaderStage.VERTEX],
+    ['buffer'],
+    [{ type: 'read-only-storage' }],
+    [[{ buffer: heightOffsetsBuffer }]],
+    'Storage',
+    device
+  );
+
+  const terrainLineListPipeline = create3DRenderPipeline(
     device,
-    'TerrainRenderer',
-    [frameBGDescriptor.bindGroupLayout],
+    'TerrainRenderer.LineList',
+    [frameBGDescriptor.bindGroupLayout, storageBGDescriptor.bindGroupLayout],
     terrainWGSL,
     terrainMesh.vertexLayout,
     terrainWGSL,
     presentationFormat,
     true,
     'line-list',
+    'back',
+    'cw'
+  );
+
+  const terainTriangleListPipeline = create3DRenderPipeline(
+    device,
+    'TerrainRenderer.TriangleList',
+    [frameBGDescriptor.bindGroupLayout, storageBGDescriptor.bindGroupLayout],
+    terrainWGSL,
+    terrainMesh.vertexLayout,
+    terrainWGSL,
+    presentationFormat,
+    true,
+    'triangle-list',
     'back',
     'cw'
   );
@@ -155,14 +209,90 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     return camera.update(deltaTime * 10, inputHandler()) as Float32Array;
   };
 
-  gui.add(settings, 'cameraPosX', -100, 100);
-  gui.add(settings, 'cameraPosY', -100, 100);
-  gui.add(settings, 'cameraPosZ', -100, 100);
-  gui.add(settings, 'scaleY', 0.0, 3.0).step(0.1);
-  gui.add(settings, 'worldScale', 1.0, 10.0).step(0.1);
-  gui.add(settings, 'Log Camera').onChange(() => {
+  let currentPipeline = terrainLineListPipeline;
 
-  })
+  const webgpuFolder = gui.addFolder('WebGPU Settings');
+  webgpuFolder
+    .add(settings, 'Topology Mode', ['line-list', 'triangle-list'])
+    .onChange(() => {
+      switch (settings['Topology Mode']) {
+        case 'line-list':
+          {
+            currentPipeline = terrainLineListPipeline;
+          }
+          break;
+        case 'triangle-list': {
+          currentPipeline = terainTriangleListPipeline;
+        }
+      }
+    });
+
+  const terrainFolder = gui.addFolder('Terrain Scale');
+  terrainFolder.add(settings, 'Height Scale', 0.0, 3.0).step(0.1);
+  terrainFolder.add(settings, 'World Scale', 1.0, 10.0).step(0.1);
+
+  const faultFormationFolder = gui.addFolder('Fault Formation');
+  faultFormationFolder
+    .add(settings, 'Fault Iterations', 0, 200, 1)
+    .onChange(() => {
+      createFaultFormation({
+        heightOffsets,
+        terrainSize: terrainDescriptor.width,
+        iterations: settings['Fault Iterations'],
+        minHeight: settings['Fault Min Height'],
+        maxHeight: settings['Fault Max Height'],
+      });
+      device.queue.writeBuffer(
+        heightOffsetsBuffer,
+        0,
+        heightOffsets.buffer,
+        heightOffsets.byteOffset,
+        heightOffsets.byteLength
+      );
+    });
+  faultFormationFolder
+    .add(settings, 'Fault Min Height', 0, 100, 1)
+    .onChange(() => {
+      if (settings['Fault Min Height'] > settings['Fault Max Height']) {
+        settings['Fault Min Height'] = settings['Fault Max Height'];
+      }
+      createFaultFormation({
+        heightOffsets,
+        terrainSize: terrainDescriptor.width,
+        iterations: settings['Fault Iterations'],
+        minHeight: settings['Fault Min Height'],
+        maxHeight: settings['Fault Max Height'],
+      });
+      device.queue.writeBuffer(
+        heightOffsetsBuffer,
+        0,
+        heightOffsets.buffer,
+        heightOffsets.byteOffset,
+        heightOffsets.byteLength
+      );
+    });
+  faultFormationFolder
+    .add(settings, 'Fault Max Height', 0, 100, 1)
+    .onChange(() => {
+      if (settings['Fault Max Height'] < settings['Fault Min Height']) {
+        settings['Fault Max Height'] = settings['Fault Min Height'];
+      }
+      createFaultFormation({
+        heightOffsets,
+        terrainSize: terrainDescriptor.width,
+        iterations: settings['Fault Iterations'],
+        minHeight: settings['Fault Min Height'],
+        maxHeight: settings['Fault Max Height'],
+      });
+      device.queue.writeBuffer(
+        heightOffsetsBuffer,
+        0,
+        heightOffsets.buffer,
+        heightOffsets.byteOffset,
+        heightOffsets.byteLength
+      );
+    });
+  faultFormationFolder.add(settings, 'Erosion Filter', 0.01, 0.5).step(0.01);
 
   let lastFrameMS = 0;
   function frame() {
@@ -198,8 +328,8 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
         settings.lightPosY,
         settings.lightPosZ,
         settings.lightIntensity,
-        settings.scaleY,
-        settings.worldScale,
+        settings['Height Scale'],
+        settings['World Scale'],
       ])
     );
 
@@ -209,8 +339,9 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
 
     const commandEncoder = device.createCommandEncoder();
     const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
-    passEncoder.setPipeline(terrainPipeline);
+    passEncoder.setPipeline(currentPipeline);
     passEncoder.setBindGroup(0, frameBGDescriptor.bindGroups[0]);
+    passEncoder.setBindGroup(1, storageBGDescriptor.bindGroups[0]);
     passEncoder.setVertexBuffer(0, terrainRenderable.vertexBuffer);
     // Pass indices at uint32 since 257 by 257 texture goes beyond 2^16
     passEncoder.setIndexBuffer(terrainRenderable.indexBuffer, 'uint32');

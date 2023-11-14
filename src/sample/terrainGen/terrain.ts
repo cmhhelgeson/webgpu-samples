@@ -111,19 +111,30 @@ interface TerrainPoint {
   z: number;
 }
 
-const createFaultFormation = (
-  p1: TerrainPoint,
-  p2: TerrainPoint,
-  terrainSize: number,
-  iterations: number,
-  minHeight: number,
-  maxHeight: number,
-  heightOffsets: Float32Array,
-) => {
+interface CreateFaultFormationArgs {
+  terrainSize: number;
+  iterations: number;
+  minHeight: number;
+  maxHeight: number;
+  heightOffsets: Float32Array;
+}
+
+export const createFaultFormation = (args: CreateFaultFormationArgs) => {
+  const { terrainSize, iterations, minHeight, maxHeight, heightOffsets } = args;
+  heightOffsets.fill(0.0);
   const heightRange = maxHeight - minHeight;
   for (let iter = 0; iter < iterations; iter++) {
     const iterationRatio = iter / iterations;
     const height = maxHeight - iterationRatio * heightRange;
+    // Generate random terrain points
+    const p1: TerrainPoint = {
+      x: 0.0,
+      z: 0.0,
+    };
+    const p2: TerrainPoint = {
+      x: 0.0,
+      z: 0.0,
+    };
     p1.x = Math.floor(Math.random() * terrainSize);
     p1.z = Math.floor(Math.random() * terrainSize);
 
@@ -134,6 +145,7 @@ const createFaultFormation = (
       if (counter === 1000) {
         break;
       }
+      counter++;
     } while (p1.x === p2.x && p1.z === p2.z);
 
     // Get deltas along x and z axis
@@ -150,8 +162,24 @@ const createFaultFormation = (
         // Get cross product
         const crossProduct = xIn * dirZ + zIn * dirX;
         // If point is on one half of line
-        heightOffsets[z * terrainSize + x] = crossProduct > 0 ? height : 0;
+        heightOffsets[z * terrainSize + x] += crossProduct > 0 ? height : 0;
       }
     }
+  }
+  normalizeArray(heightOffsets, args.minHeight, args.maxHeight);
+};
+
+export const normalizeArray = (
+  arr: Float32Array,
+  minRange: number,
+  maxRange: number
+) => {
+  const min = Math.min(...arr);
+  const max = Math.max(...arr);
+
+  const minMaxDelta = max - min;
+  const minMaxRange = maxRange - minRange;
+  for (let i = 0; i < arr.length; i++) {
+    arr[i] = ((arr[i] - min) / minMaxDelta) * minMaxRange + minRange;
   }
 };

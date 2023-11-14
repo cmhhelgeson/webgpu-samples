@@ -41,15 +41,21 @@ fn remap(
 @group(0) @binding(0) var<uniform> space_uniforms : SpaceUniforms;
 @group(0) @binding(1) var<uniform> light_uniforms: LightUniforms;
 
+// Storage Buffers
+@group(1) @binding(0) var<storage, read> height_offsets: array<f32>;
+
 @vertex
 fn vertexMain(input: VertexInput) -> VertexOutput {
   var output : VertexOutput;
   // Create the View Projection Matrix
   let VP = space_uniforms.proj_matrix * space_uniforms.view_matrix;
+
+  let index = u32(input.position.z) * 257 + u32(input.position.x);
+  let height_offset = height_offsets[index];
   
   let newPosition = vec3f(
     input.position.x * light_uniforms.world_scale,
-    input.position.y * light_uniforms.scaling_factor,
+    (input.position.y + height_offset) * light_uniforms.scaling_factor,
     input.position.z * light_uniforms.world_scale
   );
   // Get Clip space transforms and pass through values out of the way
@@ -62,8 +68,6 @@ fn vertexMain(input: VertexInput) -> VertexOutput {
 @fragment
 fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
   // Get position, direction, and distance of light in tangent space (no need to multiply by model matrix as there is no model)
-  //let normal = normalize(input.normal);
-  //let lightDir = normalize(input.light_ws - input.pos_ws);
   let color = input.posWS.y / 200.0;
   return vec4f(vec3f(255.0), 1.0);
 }
