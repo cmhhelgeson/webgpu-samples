@@ -105,3 +105,53 @@ const getHeightsGPU = async (device: GPUDevice, bitmap: ImageBitmap) => {
 
   //Commandencoder.copyBuffer ..etc
 };
+
+interface TerrainPoint {
+  x: number;
+  z: number;
+}
+
+const createFaultFormation = (
+  p1: TerrainPoint,
+  p2: TerrainPoint,
+  terrainSize: number,
+  iterations: number,
+  minHeight: number,
+  maxHeight: number,
+  heightOffsets: Float32Array,
+) => {
+  const heightRange = maxHeight - minHeight;
+  for (let iter = 0; iter < iterations; iter++) {
+    const iterationRatio = iter / iterations;
+    const height = maxHeight - iterationRatio * heightRange;
+    p1.x = Math.floor(Math.random() * terrainSize);
+    p1.z = Math.floor(Math.random() * terrainSize);
+
+    let counter = 0;
+    do {
+      p2.x = Math.floor(Math.random() * terrainSize);
+      p2.z = Math.floor(Math.random() * terrainSize);
+      if (counter === 1000) {
+        break;
+      }
+    } while (p1.x === p2.x && p1.z === p2.z);
+
+    // Get deltas along x and z axis
+    const dirX = p2.x - p1.x;
+    const dirZ = p2.z - p1.x;
+
+    // Increment height of points on one side of fault line while keeping other side unchanged.
+    // Cross product determines wether point is on a given side of line
+    for (let z = 0; z < terrainSize; z++) {
+      for (let x = 0; x < terrainSize; x++) {
+        // Calculate vector from currentPoint to generated random point
+        const xIn = x - p1.x;
+        const zIn = z - p1.z;
+        // Get cross product
+        const crossProduct = xIn * dirZ + zIn * dirX;
+        // If point is on one half of line
+        heightOffsets[z * terrainSize + x] = crossProduct > 0 ? height : 0;
+      }
+    }
+  }
+};
