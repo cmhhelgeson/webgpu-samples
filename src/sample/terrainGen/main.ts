@@ -2,12 +2,8 @@ import { mat4, vec3 } from 'wgpu-matrix';
 import { makeSample, SampleInit } from '../../components/SampleLayout';
 import { createMeshRenderable } from '../../meshes/mesh';
 import heightsFromTextureWGSL from './heightsFromTexture.wgsl';
-import { create3DRenderPipeline, createBindGroupCluster, createVBuffer } from './utils';
-import {
-  createTerrainMesh,
-  //getHeightsFromTexture,
-  TerrainDescriptor,
-} from './terrain';
+import { create3DRenderPipeline, createBindGroupCluster } from './utils';
+import { createTerrainMesh, TerrainDescriptor } from '../../meshes/terrain';
 import terrainWGSL from './terrain.wgsl';
 import { WASDCamera } from '../cameras/camera';
 import { createInputHandler } from '../cameras/input';
@@ -57,6 +53,8 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     const floatArray = new Float32Array(buffer);
     heights = floatArray;
   }
+
+  console.log(heights);
 
   // Assuming heightmap is square
   const terrainSize = Math.sqrt(heights.length);
@@ -108,7 +106,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     terrainWGSL,
     presentationFormat,
     true,
-    'triangle-list',
+    'line-list',
     'back',
     'cw'
   );
@@ -203,7 +201,8 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     passEncoder.setPipeline(terrainPipeline);
     passEncoder.setBindGroup(0, frameBGDescriptor.bindGroups[0]);
     passEncoder.setVertexBuffer(0, terrainRenderable.vertexBuffer);
-    passEncoder.setIndexBuffer(terrainRenderable.indexBuffer, 'uint16');
+    // Pass indices at uint32 since 257 by 257 texture goes beyond 2^16
+    passEncoder.setIndexBuffer(terrainRenderable.indexBuffer, 'uint32');
     passEncoder.drawIndexed(terrainRenderable.indexCount);
     passEncoder.end();
     device.queue.submit([commandEncoder.finish()]);

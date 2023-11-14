@@ -60,5 +60,5 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
   //let normal = normalize(input.normal);
   //let lightDir = normalize(input.light_ws - input.pos_ws);
   let color = input.posWS.y / 200.0;
-  return vec4f(vec3f(color), 1.0);
+  return vec4f(vec3f(255.0), 1.0);
 }

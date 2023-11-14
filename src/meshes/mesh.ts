@@ -5,15 +5,16 @@ export interface Renderable {
   vertexBuffer: GPUBuffer;
   indexBuffer: GPUBuffer;
   indexCount: number;
+  indexFormat: GPUIndexFormat;
   bindGroup?: GPUBindGroup;
-  vertexLayout?: GPUVertexFormat[],
+  vertexLayout?: GPUVertexFormat[];
 }
 
 export interface Mesh {
   vertices: Float32Array;
   indices: Uint16Array | Uint32Array;
   vertexStride: number;
-  vertexLayout?: GPUVertexFormat[],
+  vertexLayout?: GPUVertexFormat[];
 }
 
 /**
@@ -52,13 +53,16 @@ export const createMeshRenderable = (
   });
 
   // Determine whether index buffer is indices are in uint16 or uint32 format
+  let indexFormat: GPUIndexFormat;
   if (
     mesh.indices.byteLength ===
     mesh.indices.length * Uint16Array.BYTES_PER_ELEMENT
   ) {
     new Uint16Array(indexBuffer.getMappedRange()).set(mesh.indices);
+    indexFormat = 'uint16';
   } else {
     new Uint32Array(indexBuffer.getMappedRange()).set(mesh.indices);
+    indexFormat = 'uint32';
   }
 
   indexBuffer.unmap();
@@ -66,6 +70,7 @@ export const createMeshRenderable = (
   return {
     vertexBuffer,
     indexBuffer,
+    indexFormat,
     indexCount: mesh.indices.length,
   };
 };
