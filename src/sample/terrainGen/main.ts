@@ -154,7 +154,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     true,
     'line-list',
     'back',
-    'cw'
+    'ccw'
   );
 
   const terainTriangleListPipeline = create3DRenderPipeline(
@@ -168,7 +168,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     true,
     'triangle-list',
     'back',
-    'cw'
+    'ccw'
   );
 
   // Create Render Pass Descriptor

@@ -69,5 +69,5 @@ fn vertexMain(input: VertexInput) -> VertexOutput {
 fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
   // Get position, direction, and distance of light in tangent space (no need to multiply by model matrix as there is no model)
   let color = input.posWS.y / 200.0;
-  return vec4f(vec3f(255.0), 1.0);
+  return vec4f(vec3f(color), 1.0);
 }
