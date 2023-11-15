@@ -1,44 +1,35 @@
 import { mat4, vec3 } from 'wgpu-matrix';
 import { makeSample, SampleInit } from '../../components/SampleLayout';
-import cubeWGSL from './cube.wgsl';
 import mbPositionsWGSL from './mbPositions.wgsl';
-import { ArcballCamera, WASDCamera, cameraSourceInfo } from '../cameras/camera';
+import { WASDCamera, cameraSourceInfo } from '../cameras/camera';
 import { createInputHandler, inputSourceInfo } from '../cameras/input';
-import { create3DRenderPipeline } from '../normalMap/utils';
+import {
+  create3DRenderPipeline,
+  createBindGroupCluster,
+  createTextureFromImage,
+} from './utils';
+import { createBoxMesh } from '../../meshes/box';
+import { createMeshRenderable } from '../../meshes/mesh';
 
 const init: SampleInit = async ({ canvas, pageState, gui }) => {
   if (!pageState.active) {
     return;
   }
 
-  // The input handler
+  // Create camera and camera inputHandler
   const inputHandler = createInputHandler(window, canvas);
-
-  // The camera types
   const initialCameraPosition = vec3.create(3, 2, 5);
-  const cameras = {
-    arcball: new ArcballCamera({ position: initialCameraPosition }),
-    WASD: new WASDCamera({ position: initialCameraPosition }),
-  };
+  const camera = new WASDCamera({
+    position: initialCameraPosition,
+  });
 
-  // GUI parameters
-  const params: { 
-    type: 'arcball' | 'WASD',
-    motionBlur: 'on' | 'off',
-  } = {
-    type: 'arcball',
+  // GUI settings
+  const settings = {
     motionBlur: 'off',
   };
 
   // Callback handler for camera mode
-  let oldCameraType = params.type;
-  gui.add(params, 'type', ['arcball', 'WASD']).onChange(() => {
-    // Copy the camera matrix from old to new
-    const newCameraType = params.type;
-    cameras[newCameraType].matrix = cameras[oldCameraType].matrix;
-    oldCameraType = newCameraType;
-  });
-  gui.add(params, 'motionBlur', ['on', 'off']);
+  gui.add(settings, 'motionBlur', ['on', 'off']);
 
   const adapter = await navigator.gpu.requestAdapter();
   const device = await adapter.requestDevice();
@@ -55,77 +46,58 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     alphaMode: 'premultiplied',
   });
 
-  
-
-  const mbPostionsPipeline = create3DRenderPipeline(
-    device,
-    'MB_Positions',
-    mbPositionsWGSL,
-    ['float32x3', 'float32x3', 'float32x2'],
-    mbPositionsWGSL,
-
-
-  )
-
-  const depthTexture = device.createTexture({
-    size: [canvas.width, canvas.height],
-    format: 'depth24plus',
-    usage: GPUTextureUsage.RENDER_ATTACHMENT,
-  });
-
-  const uniformBufferSize = 4 * 16; // 4x4 matrix
-  const uniformBuffer = device.createBuffer({
-    size: uniformBufferSize,
+  // Create Uniform buffers for positions pipeline
+  const Mat4x4fBytes = 64;
+  const spaceTransformsBuffer = device.createBuffer({
+    size: Mat4x4fBytes * 4,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
 
-  // Fetch the image and upload it into a GPUTexture.
+  // Get texture and texture linear interpolation sampler
   let cubeTexture: GPUTexture;
   {
     const response = await fetch('../assets/img/Di-3d.png');
     const imageBitmap = await createImageBitmap(await response.blob());
-
-    cubeTexture = device.createTexture({
-      size: [imageBitmap.width, imageBitmap.height, 1],
-      format: 'rgba8unorm',
-      usage:
-        GPUTextureUsage.TEXTURE_BINDING |
-        GPUTextureUsage.COPY_DST |
-        GPUTextureUsage.RENDER_ATTACHMENT,
-    });
-    device.queue.copyExternalImageToTexture(
-      { source: imageBitmap },
-      { texture: cubeTexture },
-      [imageBitmap.width, imageBitmap.height]
-    );
+    cubeTexture = createTextureFromImage(device, imageBitmap);
   }
-
-  // Create a sampler with linear filtering for smooth interpolation.
   const sampler = device.createSampler({
     magFilter: 'linear',
     minFilter: 'linear',
   });
 
-  const uniformBindGroup = device.createBindGroup({
-    layout: pipeline.getBindGroupLayout(0),
-    entries: [
+  const positionsBGCluster = createBindGroupCluster(
+    [0, 1, 2],
+    [GPUShaderStage.VERTEX, GPUShaderStage.FRAGMENT, GPUShaderStage.FRAGMENT],
+    ['buffer', 'texture', 'sampler'],
+    [{ type: 'uniform' }, { type: 'filtering' }, { sampleType: 'float' }],
+    [[{ buffer: spaceTransformsBuffer }, cubeTexture.createView(), sampler]],
+    'MB_Positions',
+    device
+  );
+
+  const mbPostionsPipeline = create3DRenderPipeline(device, {
+    label: 'MB_Positions',
+    vertexShader: mbPositionsWGSL,
+    fragmentShader: mbPositionsWGSL,
+    vBufferFormats: ['float32x3', 'float32x3', 'float32x2'],
+    bgLayouts: [positionsBGCluster.bindGroupLayout],
+    // Write previous and current positions
+    colorTargets: [
       {
-        binding: 0,
-        resource: {
-          buffer: uniformBuffer,
-        },
-      },
-      {
-        binding: 1,
-        resource: sampler,
-      },
-      {
-        binding: 2,
-        resource: cubeTexture.createView(),
+        format: presentationFormat,
       },
     ],
   });
 
+  const boxMesh = createBoxMesh(1, 1, 1);
+  const box = createMeshRenderable(device, boxMesh);
+
+  // Create renderPassDescriptor
+  const depthTexture = device.createTexture({
+    size: [canvas.width, canvas.height],
+    format: 'depth24plus',
+    usage: GPUTextureUsage.RENDER_ATTACHMENT,
+  });
   const renderPassDescriptor: GPURenderPassDescriptor = {
     colorAttachments: [
       {
@@ -145,6 +117,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     },
   };
 
+  // Get projection and modelViewMatrixes
   const aspect = canvas.width / canvas.height;
   const projectionMatrix = mat4.perspective(
     (2 * Math.PI) / 5,
@@ -153,14 +126,28 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     100.0
   );
 
-  const currentModelViewProjectionMatrix = mat4.create();
-  const modelViewProjectionMatrix = mat4.create();
+  // 0: prevView, 1: currView, 2: prevViewProj, 3: currViewProj
+  const spaceTransformMatrices = [
+    mat4.create(),
+    mat4.create(),
+    mat4.create(),
+    mat4.create(),
+  ];
 
-  function getModelViewProjectionMatrix(deltaTime: number) {
-    const camera = cameras[params.type];
-    const viewMatrix = camera.update(deltaTime, inputHandler());
-    mat4.multiply(projectionMatrix, viewMatrix, modelViewProjectionMatrix);
-    return modelViewProjectionMatrix as Float32Array;
+  function updateMatrices(deltaTime: number) {
+    // Pass previous frame's matrices into storage matrices
+    mat4.copy(spaceTransformMatrices[1], spaceTransformMatrices[0]);
+    mat4.copy(spaceTransformMatrices[3], spaceTransformMatrices[2]);
+    // Calculate new view and viewProjection Matrices
+    mat4.copy(
+      camera.update(deltaTime, inputHandler()),
+      spaceTransformMatrices[1]
+    );
+    mat4.multiply(
+      projectionMatrix,
+      spaceTransformMatrices[1],
+      spaceTransformMatrices[3],
+    );
   }
 
   let lastFrameMS = Date.now();
@@ -175,24 +162,29 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
       return;
     }
 
-    const modelViewProjection = getModelViewProjectionMatrix(deltaTime);
-    device.queue.writeBuffer(
-      uniformBuffer,
-      0,
-      modelViewProjection.buffer,
-      modelViewProjection.byteOffset,
-      modelViewProjection.byteLength
-    );
+    updateMatrices(deltaTime);
+    for (let i = 0; i < 4; i++) {
+      const arr = spaceTransformMatrices[i] as Float32Array
+      device.queue.writeBuffer(
+        spaceTransformsBuffer,
+        i * 64,
+        arr.buffer,
+        arr.byteOffset,
+        arr.byteLength
+      );
+    }
+
     renderPassDescriptor.colorAttachments[0].view = context
       .getCurrentTexture()
       .createView();
 
     const commandEncoder = device.createCommandEncoder();
     const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
-    passEncoder.setPipeline(standardPipeline);
-    passEncoder.setBindGroup(0, uniformBindGroup);
-    passEncoder.setVertexBuffer(0, verticesBuffer);
-    passEncoder.draw(cubeVertexCount);
+    passEncoder.setPipeline(mbPostionsPipeline);
+    passEncoder.setBindGroup(0, positionsBGCluster.bindGroups[0]);
+    passEncoder.setVertexBuffer(0, box.vertexBuffer);
+    passEncoder.setIndexBuffer(box.indexBuffer, 'uint16');
+    passEncoder.drawIndexed(box.indexCount);
     passEncoder.end();
     device.queue.submit([commandEncoder.finish()]);
 
@@ -201,10 +193,10 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
   requestAnimationFrame(frame);
 };
 
-const Cameras: () => JSX.Element = () =>
+const MotionBlur: () => JSX.Element = () =>
   makeSample({
-    name: 'Cameras',
-    description: 'This example provides example camera implementations',
+    name: 'Motion Blur',
+    description: 'This example provides a simple motion blur implementation',
     gui: true,
     init,
     sources: [
@@ -215,17 +207,17 @@ const Cameras: () => JSX.Element = () =>
       cameraSourceInfo,
       inputSourceInfo,
       {
-        name: '../../shaders/cube.wgsl',
-        contents: cubeWGSL,
+        name: '../../shaders/mbPositions.wgsl',
+        contents: mbPositionsWGSL,
         editable: true,
       },
       {
-        name: '../../meshes/cube.ts',
+        name: '../../meshes/box.ts',
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        contents: require('!!raw-loader!../../meshes/cube.ts').default,
+        contents: require('!!raw-loader!../../meshes/box.ts').default,
       },
     ],
     filename: __filename,
   });
 
-export default Cameras;
+export default MotionBlur;

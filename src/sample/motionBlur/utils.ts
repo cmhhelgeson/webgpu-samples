@@ -5,7 +5,7 @@ type BindGroupBindingLayout =
   | GPUStorageTextureBindingLayout
   | GPUExternalTextureBindingLayout;
 
-export type BindGroupsObjectsAndLayout = {
+export type BindGroupCluster = {
   bindGroups: GPUBindGroup[];
   bindGroupLayout: GPUBindGroupLayout;
 };
@@ -21,9 +21,9 @@ type ResourceTypeName =
  * @param {number[]} bindings - The binding value of each resource in the bind group.
  * @param {number[]} visibilities - The GPUShaderStage visibility of the resource at the corresponding index.
  * @param {ResourceTypeName[]} resourceTypes - The resourceType at the corresponding index.
- * @returns {BindGroupsObjectsAndLayout} An object containing an array of bindGroups and the bindGroupLayout they implement.
+ * @returns {BindGroupCluster} An object containing an array of bindGroups and the bindGroupLayout they implement.
  */
-export const createBindGroupDescriptor = (
+export const createBindGroupCluster = (
   bindings: number[],
   visibilities: number[],
   resourceTypes: ResourceTypeName[],
@@ -31,7 +31,7 @@ export const createBindGroupDescriptor = (
   resources: GPUBindingResource[][],
   label: string,
   device: GPUDevice
-): BindGroupsObjectsAndLayout => {
+): BindGroupCluster => {
   // Create layout of each entry within a bindGroup
   const layoutEntries: GPUBindGroupLayoutEntry[] = [];
   for (let i = 0; i < bindings.length; i++) {
@@ -132,18 +132,33 @@ export const createVBuffer = (
   return layout;
 };
 
+type Create3DRenderPipelineArgs = {
+  label: string;
+  bgLayouts: GPUBindGroupLayout[];
+  vertexShader: string;
+  vBufferFormats: GPUVertexFormat[];
+  fragmentShader: string;
+  colorTargets: GPUColorTargetState[];
+  depthTest?: boolean;
+  topology?: GPUPrimitiveTopology;
+  cullMode?: GPUCullMode;
+};
+
 export const create3DRenderPipeline = (
   device: GPUDevice,
-  label: string,
-  bgLayouts: GPUBindGroupLayout[],
-  vertexShader: string,
-  vBufferFormats: GPUVertexFormat[],
-  fragmentShader: string,
-  presentationFormat: GPUTextureFormat,
-  depthTest = false,
-  topology: GPUPrimitiveTopology = 'triangle-list',
-  cullMode: GPUCullMode = 'back'
+  args: Create3DRenderPipelineArgs
 ) => {
+  const {
+    label,
+    bgLayouts,
+    vertexShader,
+    vBufferFormats,
+    fragmentShader,
+    colorTargets,
+    depthTest,
+    topology,
+    cullMode,
+  } = args;
   const pipelineDescriptor: GPURenderPipelineDescriptor = {
     label: `${label}.pipeline`,
     layout: device.createPipelineLayout({
@@ -165,18 +180,14 @@ export const create3DRenderPipeline = (
         code: fragmentShader,
       }),
       entryPoint: 'fragmentMain',
-      targets: [
-        {
-          format: presentationFormat,
-        },
-      ],
+      targets: colorTargets,
     },
     primitive: {
-      topology: topology,
-      cullMode: cullMode,
+      topology: topology ? topology : 'triangle-list',
+      cullMode: cullMode ? cullMode : 'back',
     },
   };
-  if (depthTest) {
+  if (depthTest === undefined || depthTest !== false) {
     pipelineDescriptor.depthStencil = {
       depthCompare: 'less',
       depthWriteEnabled: true,
@@ -188,11 +199,12 @@ export const create3DRenderPipeline = (
 
 export const createTextureFromImage = (
   device: GPUDevice,
-  bitmap: ImageBitmap
+  bitmap: ImageBitmap,
+  format: GPUTextureFormat = 'rgba8unorm'
 ) => {
   const texture: GPUTexture = device.createTexture({
     size: [bitmap.width, bitmap.height, 1],
-    format: 'rgba8unorm',
+    format: format,
     usage:
       GPUTextureUsage.TEXTURE_BINDING |
       GPUTextureUsage.COPY_DST |
