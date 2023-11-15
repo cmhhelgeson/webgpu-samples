@@ -117,10 +117,18 @@ interface CreateFaultFormationArgs {
   minHeight: number;
   maxHeight: number;
   heightOffsets: Float32Array;
+  erosionFilter: number,
 }
 
 export const createFaultFormation = (args: CreateFaultFormationArgs) => {
-  const { terrainSize, iterations, minHeight, maxHeight, heightOffsets } = args;
+  const {
+    terrainSize,
+    iterations,
+    minHeight,
+    maxHeight,
+    heightOffsets,
+    erosionFilter,
+  } = args;
   heightOffsets.fill(0.0);
   const heightRange = maxHeight - minHeight;
   for (let iter = 0; iter < iterations; iter++) {
@@ -166,10 +174,12 @@ export const createFaultFormation = (args: CreateFaultFormationArgs) => {
       }
     }
   }
+
+  applyFiniteImpulseResponseFilter(terrainSize, heightOffsets, erosionFilter);
   normalizeArray(heightOffsets, args.minHeight, args.maxHeight);
 };
 
-export const normalizeArray = (
+const normalizeArray = (
   arr: Float32Array,
   minRange: number,
   maxRange: number
@@ -181,5 +191,32 @@ export const normalizeArray = (
   const minMaxRange = maxRange - minRange;
   for (let i = 0; i < arr.length; i++) {
     arr[i] = ((arr[i] - min) / minMaxDelta) * minMaxRange + minRange;
+  }
+};
+
+// In an FIR Filter, the output of a signal (a non-zero value will settle back to zero after a finite number of steps)
+// Interpolate between the previous height value and the next height value a finite step down the distance between the two
+// Formula = For i = 1 to i = heights.length, FilterColumn[i - 1] * erosionFilter + (1 - erosionFilter) * HeightsColumn[i]
+// | Heights | Filter 0.0 | Filter 0.5 | Filter 1.0 |
+// |  30     |     30     |    30      |     30     |
+// |  13     |     13     |    21.5    |     30     |
+// |  41     |     41     |    31.25   |     30     |
+// |  77     |     77     |    54.125  |     30     |
+
+const applyFiniteImpulseResponseFilter = (
+  terrainSize: number,
+  heightOffsets: Float32Array,
+  erosionFilter: number
+) => {
+  const reverseErosionFilter = 1 - erosionFilter;
+  // Only appling left to right, which is why we get original height at this depth value
+  for (let z = 0; z < terrainSize; z++) {
+    let prevVal = heightOffsets[z * terrainSize];
+    for (let x = 1; x < terrainSize; x++) {
+      const curVal = heightOffsets[z * terrainSize + x];
+      const finiteImpulseVal = erosionFilter * prevVal + reverseErosionFilter * curVal;
+      heightOffsets[z * terrainSize + x] = finiteImpulseVal;
+      prevVal = finiteImpulseVal;
+    }
   }
 };

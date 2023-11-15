@@ -98,6 +98,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     iterations: settings['Fault Iterations'],
     minHeight: settings['Fault Min Height'],
     maxHeight: settings['Fault Max Height'],
+    erosionFilter: settings['Erosion Filter'],
   });
 
   device.queue.writeBuffer(
@@ -241,6 +242,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
         iterations: settings['Fault Iterations'],
         minHeight: settings['Fault Min Height'],
         maxHeight: settings['Fault Max Height'],
+        erosionFilter: settings['Erosion Filter'],
       });
       device.queue.writeBuffer(
         heightOffsetsBuffer,
@@ -262,6 +264,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
         iterations: settings['Fault Iterations'],
         minHeight: settings['Fault Min Height'],
         maxHeight: settings['Fault Max Height'],
+        erosionFilter: settings['Erosion Filter'],
       });
       device.queue.writeBuffer(
         heightOffsetsBuffer,
@@ -283,6 +286,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
         iterations: settings['Fault Iterations'],
         minHeight: settings['Fault Min Height'],
         maxHeight: settings['Fault Max Height'],
+        erosionFilter: settings['Erosion Filter'],
       });
       device.queue.writeBuffer(
         heightOffsetsBuffer,
@@ -292,7 +296,25 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
         heightOffsets.byteLength
       );
     });
-  faultFormationFolder.add(settings, 'Erosion Filter', 0.01, 0.5).step(0.01);
+  faultFormationFolder
+    .add(settings, 'Erosion Filter', 0.01, 1.0, 0.01)
+    .onChange(() => {
+      createFaultFormation({
+        heightOffsets,
+        terrainSize: terrainDescriptor.width,
+        iterations: settings['Fault Iterations'],
+        minHeight: settings['Fault Min Height'],
+        maxHeight: settings['Fault Max Height'],
+        erosionFilter: settings['Erosion Filter'],
+      });
+      device.queue.writeBuffer(
+        heightOffsetsBuffer,
+        0,
+        heightOffsets.buffer,
+        heightOffsets.byteOffset,
+        heightOffsets.byteLength
+      );
+    });
 
   let lastFrameMS = 0;
   function frame() {
