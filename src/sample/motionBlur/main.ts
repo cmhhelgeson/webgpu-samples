@@ -14,12 +14,6 @@ import { createMeshRenderable } from '../../meshes/mesh';
 import vertexTextureQuadWGSL from './vertexTextureQuad.wgsl';
 import secondPassWGSL from './secondPass.wgsl';
 
-enum RenderMode {
-  POSITIONS,
-  VELOCITY,
-  BLUR,
-}
-
 const init: SampleInit = async ({ canvas, pageState, gui }) => {
   if (!pageState.active) {
     return;
@@ -36,19 +30,23 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
   };
 
   // GUI parameters
-  const params = {
+  const settings = {
     type: 'arcball',
     'Render Mode': 'POSITIONS',
+    'Velocity Scale': 1.0,
+    'Velocity Samples': 2,
   };
 
   // Callback handler for camera mode
-  let oldCameraType = params.type;
-  gui.add(params, 'type', ['arcball', 'WASD']).onChange(() => {
+  let oldCameraType = settings.type;
+  gui.add(settings, 'type', ['arcball', 'WASD']).onChange(() => {
     // Copy the camera matrix from old to new
-    const newCameraType = params.type;
+    const newCameraType = settings.type;
     cameras[newCameraType].matrix = cameras[oldCameraType].matrix;
     oldCameraType = newCameraType;
   });
+  gui.add(settings, 'Velocity Scale', 0.1, 10.0, 0.1);
+  gui.add(settings, 'Velocity Samples', 1, 30).step(1);
 
   const adapter = await navigator.gpu.requestAdapter();
   const device = await adapter.requestDevice();
@@ -153,18 +151,26 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
   };
 
   // Define resources for second pass
+
+  const secondPassUniformsBuffer = device.createBuffer({
+    size: Float32Array.BYTES_PER_ELEMENT * 2,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+
   const secondPassBGCluster = createBindGroupCluster(
-    [0, 1],
+    [0, 1, 2],
     [GPUShaderStage.FRAGMENT],
-    ['texture', 'texture'],
+    ['texture', 'texture', 'buffer'],
     [
       { sampleType: 'unfilterable-float' },
       { sampleType: 'unfilterable-float' },
+      { type: 'uniform' },
     ],
     [
       [
         firstPassColorTexture.createView(),
         firstPassVelocityTexture.createView(),
+        { buffer: secondPassUniformsBuffer },
       ],
     ],
     'SecondPass',
@@ -213,7 +219,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     // Copy current matrices into prev matrices
     mat4.copy(currViewMat, prevViewMat);
     mat4.copy(currViewProjMat, prevViewProjMat);
-    const camera = cameras[params.type];
+    const camera = cameras[settings.type];
     mat4.copy(camera.update(deltaTime, inputHandler()), currViewMat);
     mat4.multiply(projectionMatrix, currViewMat, currViewProjMat);
     return {
@@ -237,6 +243,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     }
 
     const modelViewProjection = getMatrices(deltaTime);
+    // Write to first pass
     device.queue.writeBuffer(
       uniformBuffer,
       0,
@@ -266,6 +273,20 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
       modelViewProjection.currViewProj.byteLength
     );
 
+    // Write to second pass
+    device.queue.writeBuffer(
+      secondPassUniformsBuffer,
+      0,
+      new Float32Array([settings['Velocity Scale']])
+    );
+
+    device.queue.writeBuffer(
+      secondPassUniformsBuffer,
+      4,
+      new Uint32Array([settings['Velocity Scale']])
+    );
+
+    // Run first pass
     const commandEncoder = device.createCommandEncoder();
     const firstPassEncoder =
       commandEncoder.beginRenderPass(firstPassDescriptor);
@@ -276,6 +297,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     firstPassEncoder.drawIndexed(box.indexCount);
     firstPassEncoder.end();
 
+    // Run second pass
     secondPassDescriptor.colorAttachments[0].view = context
       .getCurrentTexture()
       .createView();
