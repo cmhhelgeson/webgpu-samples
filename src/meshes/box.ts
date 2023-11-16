@@ -100,6 +100,13 @@ export function createBoxMeshWithTangents(
   return {
     vertices,
     indices,
+    vertexFormats: [
+      'float32x3',
+      'float32x3',
+      'float32x2',
+      'float32x3',
+      'float32x3',
+    ],
     vertexStride,
   };
 }
@@ -177,6 +184,7 @@ export function createBoxMesh(
   return {
     vertices,
     indices,
+    vertexFormats: ['float32x3', 'float32x3', 'float32x2'],
     vertexStride,
   };
 }

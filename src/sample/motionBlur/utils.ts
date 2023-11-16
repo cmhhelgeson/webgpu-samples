@@ -134,7 +134,7 @@ export const createVBuffer = (
 
 type Create3DRenderPipelineArgs = {
   label: string;
-  bgLayouts: GPUBindGroupLayout[];
+  bgLayouts?: GPUBindGroupLayout[];
   vertexShader: string;
   vBufferFormats: GPUVertexFormat[];
   fragmentShader: string;
@@ -161,10 +161,12 @@ export const create3DRenderPipeline = (
   } = args;
   const pipelineDescriptor: GPURenderPipelineDescriptor = {
     label: `${label}.pipeline`,
-    layout: device.createPipelineLayout({
-      label: `${label}.pipelineLayout`,
-      bindGroupLayouts: bgLayouts,
-    }),
+    layout: bgLayouts
+      ? device.createPipelineLayout({
+          label: `${label}.pipelineLayout`,
+          bindGroupLayouts: bgLayouts,
+        })
+      : 'auto',
     vertex: {
       module: device.createShaderModule({
         label: `${label}.vertexShader`,
@@ -195,6 +197,23 @@ export const create3DRenderPipeline = (
     };
   }
   return device.createRenderPipeline(pipelineDescriptor);
+};
+
+export const createRenderPassColorAttachments = (
+  device: GPUDevice,
+  textures: GPUTexture[],
+  clearValue: GPUColor
+): GPURenderPassColorAttachment[] => {
+  const colorAttachments: GPURenderPassColorAttachment[] = [];
+  for (let i = 0; i < textures.length; i++) {
+    colorAttachments.push({
+      view: textures[i].createView(),
+      clearValue: clearValue,
+      loadOp: 'clear',
+      storeOp: 'store',
+    });
+  }
+  return colorAttachments;
 };
 
 export const createTextureFromImage = (

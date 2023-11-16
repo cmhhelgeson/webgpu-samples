@@ -3,6 +3,7 @@ import { vec3, vec2 } from 'wgpu-matrix';
 // Defines what to pass to pipeline to render mesh
 export interface Renderable {
   vertexBuffer: GPUBuffer;
+  vertexFormats: GPUVertexFormat[];
   indexBuffer: GPUBuffer;
   indexCount: number;
   bindGroup?: GPUBindGroup;
@@ -12,6 +13,7 @@ export interface Mesh {
   vertices: Float32Array;
   indices: Uint16Array | Uint32Array;
   vertexStride: number;
+  vertexFormats: GPUVertexFormat[];
 }
 
 /**
@@ -64,6 +66,7 @@ export const createMeshRenderable = (
   return {
     vertexBuffer,
     indexBuffer,
+    vertexFormats: mesh.vertexFormats,
     indexCount: mesh.indices.length,
   };
 };

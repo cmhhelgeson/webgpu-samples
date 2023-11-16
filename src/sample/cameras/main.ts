@@ -28,7 +28,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
 
   // GUI parameters
   const params: { type: 'arcball' | 'WASD' } = {
-    type: 'arcball',
+    type: 'WASD',
   };
 
   // Callback handler for camera mode
