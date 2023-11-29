@@ -17,12 +17,14 @@ struct VertexOutput {
 }
 
 struct FragmentOutput {
+  // Color output rgba
   @location(0) color : vec4<f32>,
-  @location(1) velocity : vec2<f32>,
+  // Velocity output rgba16float
+  @location(1) velocity : vec4<f32>,
 }
 
 @vertex
-fn vertexMain(
+fn vert_main(
   @location(0) position : vec4f,
   @location(1) normal : vec3f,
   @location(2) uv: vec2f,
@@ -36,11 +38,18 @@ fn vertexMain(
 }
 
 @fragment
-fn fragmentMain(input: VertexOutput) -> FragmentOutput {
+fn frag_main(input: VertexOutput) -> FragmentOutput {
   var output: FragmentOutput;
-  let a = (input.currPosCS.xy / input.currPosCS.w) * 0.5 + 0.5;
-  let b = (input.prevPosCS.xy / input.prevPosCS.w) * 0.5 + 0.5;
+  var pos0 = (input.prevPosCS.xyz / input.prevPosCS.w);
+  pos0 += 1.0;
+  pos0 /= 2.0;
+
+  var pos1 = (input.currPosCS.xyz / input.currPosCS.w);
+  pos1 += 1.0;
+  pos1 /= 2.0;
+
   output.color = textureSample(myTexture, mySampler, input.fragUV);
-  output.velocity = a - b;
+  let velocity = pos1 - pos0;
+  output.velocity = vec4<f32>(velocity * 20, 1.0);
   return output;
 }

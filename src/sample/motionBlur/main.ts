@@ -18,6 +18,20 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
   if (!pageState.active) {
     return;
   }
+  const adapter = await navigator.gpu.requestAdapter();
+  const device = await adapter.requestDevice();
+  const context = canvas.getContext('webgpu') as GPUCanvasContext;
+
+  const devicePixelRatio = window.devicePixelRatio;
+  canvas.width = canvas.clientWidth * devicePixelRatio;
+  canvas.height = canvas.clientHeight * devicePixelRatio;
+  const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+
+  context.configure({
+    device,
+    format: presentationFormat,
+    alphaMode: 'premultiplied',
+  });
 
   // The input handler
   const inputHandler = createInputHandler(window, canvas);
@@ -35,33 +49,9 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     'Render Mode': 'POSITIONS',
     'Velocity Scale': 1.0,
     'Velocity Samples': 2,
+    'Scale On': true,
+    'Scale Speed': 1,
   };
-
-  // Callback handler for camera mode
-  let oldCameraType = settings.type;
-  gui.add(settings, 'type', ['arcball', 'WASD']).onChange(() => {
-    // Copy the camera matrix from old to new
-    const newCameraType = settings.type;
-    cameras[newCameraType].matrix = cameras[oldCameraType].matrix;
-    oldCameraType = newCameraType;
-  });
-  gui.add(settings, 'Velocity Scale', 0.1, 10.0, 0.1);
-  gui.add(settings, 'Velocity Samples', 1, 30).step(1);
-
-  const adapter = await navigator.gpu.requestAdapter();
-  const device = await adapter.requestDevice();
-  const context = canvas.getContext('webgpu') as GPUCanvasContext;
-
-  const devicePixelRatio = window.devicePixelRatio;
-  canvas.width = canvas.clientWidth * devicePixelRatio;
-  canvas.height = canvas.clientHeight * devicePixelRatio;
-  const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-
-  context.configure({
-    device,
-    format: presentationFormat,
-    alphaMode: 'premultiplied',
-  });
 
   // Define resources for first pass
   const boxMesh = createBoxMesh(1, 1, 1);
@@ -97,6 +87,20 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     device
   );
 
+  // Initial color pass without blur
+  const firstPassColorTexture = device.createTexture({
+    size: [canvas.width, canvas.height],
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    format: presentationFormat,
+  });
+
+  // Per pixel vec2<f32> velocity pass
+  const firstPassVelocityTexture = device.createTexture({
+    size: [canvas.width, canvas.height],
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    format: 'rgba16float',
+  });
+
   const firstPassPipeline = create3DRenderPipeline(device, {
     label: 'FirstPass',
     bgLayouts: [firstPassBGCluster.bindGroupLayout],
@@ -110,23 +114,9 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
       },
       // Velocity output
       {
-        format: 'rg16float',
+        format: firstPassVelocityTexture.format,
       },
     ],
-  });
-
-  // Initial color pass without blur
-  const firstPassColorTexture = device.createTexture({
-    size: [canvas.width, canvas.height],
-    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-    format: presentationFormat,
-  });
-
-  // Per pixel vec2<f32> velocity pass
-  const firstPassVelocityTexture = device.createTexture({
-    size: [canvas.width, canvas.height],
-    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-    format: 'rg16float',
   });
 
   const depthTexture = device.createTexture({
@@ -157,20 +147,27 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
 
+  const secondPassSampler = device.createSampler({
+    minFilter: 'nearest',
+    magFilter: 'nearest',
+  });
+
   const secondPassBGCluster = createBindGroupCluster(
-    [0, 1, 2],
+    [0, 1, 2, 3],
     [GPUShaderStage.FRAGMENT],
-    ['texture', 'texture', 'buffer'],
+    ['texture', 'texture', 'buffer', 'sampler'],
     [
-      { sampleType: 'unfilterable-float' },
+      { sampleType: 'float' },
       { sampleType: 'unfilterable-float' },
       { type: 'uniform' },
+      { type: 'filtering' },
     ],
     [
       [
         firstPassColorTexture.createView(),
         firstPassVelocityTexture.createView(),
         { buffer: secondPassUniformsBuffer },
+        secondPassSampler,
       ],
     ],
     'SecondPass',
@@ -210,24 +207,54 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     1,
     100.0
   );
-  const prevViewMat = mat4.create();
-  const currViewMat = mat4.create();
-  const prevViewProjMat = mat4.create();
-  const currViewProjMat = mat4.create();
+
+  function getModelMatrix(deltaTime: number) {
+    const modelMatrix = mat4.create();
+    mat4.identity(modelMatrix);
+    const now = Date.now() / 1000;
+    mat4.rotateY(modelMatrix, now * 20, modelMatrix);
+
+    return modelMatrix;
+  }
+
+  const prevModelViewMat = mat4.create();
+  const currModelViewMat = mat4.create();
+  const prevModelViewProjMat = mat4.create();
+  const currModelViewProjMat = mat4.create();
 
   function getMatrices(deltaTime: number) {
     // Copy current matrices into prev matrices
-    mat4.copy(currViewMat, prevViewMat);
-    mat4.copy(currViewProjMat, prevViewProjMat);
+    mat4.copy(currModelViewMat, prevModelViewMat);
+    mat4.copy(currModelViewProjMat, prevModelViewProjMat);
+    //Update the camera/viewMatrix (only exists in this scope)
+    const currViewMat = mat4.create();
     const camera = cameras[settings.type];
     mat4.copy(camera.update(deltaTime, inputHandler()), currViewMat);
-    mat4.multiply(projectionMatrix, currViewMat, currViewProjMat);
+    //Multiply the modelMatrix with the view matrix, and place value in modelViewMatrix
+    mat4.multiply(currViewMat, getModelMatrix(deltaTime), currModelViewMat);
+    //Multiply the projection Matrix with the modelViewMatrix
+    mat4.multiply(projectionMatrix, currModelViewMat, currModelViewProjMat);
     return {
-      prevView: prevViewMat as Float32Array,
-      currView: currViewMat as Float32Array,
-      prevViewProj: prevViewProjMat as Float32Array,
-      currViewProj: currViewProjMat as Float32Array,
+      prevView: prevModelViewMat as Float32Array,
+      currView: currModelViewMat as Float32Array,
+      prevViewProj: prevModelViewProjMat as Float32Array,
+      currViewProj: currModelViewProjMat as Float32Array,
     };
+  }
+
+  // Callback handler for camera mode
+  let oldCameraType = settings.type;
+  if (!gui.__folders.Velocity) {
+    const velocityFolder = gui.addFolder('Velocity');
+    velocityFolder.add(settings, 'Velocity Scale', 0.1, 10.0, 0.1);
+    velocityFolder.add(settings, 'Velocity Samples', 1, 30).step(1);
+  }
+  if (!gui.__folders.Scale) {
+    const scaleFolder = gui.addFolder('Scale');
+    const scaleOnController = scaleFolder
+      .add(settings, 'Scale On')
+      .onChange(() => scaleOnController.setValue(!settings['Scale On']));
+    scaleFolder.add(settings, 'Scale Speed', 1, 50).step(1);
   }
 
   let lastFrameMS = Date.now();
