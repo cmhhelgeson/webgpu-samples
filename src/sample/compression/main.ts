@@ -26,14 +26,29 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
     alphaMode: 'premultiplied',
   });
 
-  const rleBufferDescriptor = {
-    size: Float32Array.BYTES_PER_ELEMENT * 1000,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+  let elements: Uint32Array;
+
+  let rleSymbolsBuffer: GPUBuffer;
+  let rleCountsBuffer: GPUBuffer;
+
+  const generateRLEUncompressedArray = (numVals: number) => {
+    let symbols = new Uint32Array(numVals);
+    let i = 0;
+    while (i < numVals) {
+      const valToRepeat = Math.floor(Math.random() * 9);
+      const repeating = Math.floor(Math.random() * 9);
+      for (let j = i; j < i + repeating && j < numVals; j++) {
+        symbols[j] = valToRepeat;
+      }
+    }
+    const rleBufferDescriptor = {
+      size: Float32Array.BYTES_PER_ELEMENT * numVals,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+    }
+    rleSymbolsBuffer = device.createBuffer(rleBufferDescriptor);
+
+    rleCountsBuffer = device.createBuffer(rleBufferDescriptor);
   }
-
-  const rleSymbolsBuffer = device.createBuffer(rleBufferDescriptor);
-
-  const rleCountsBuffer = device.createBuffer(rleBufferDescriptor);
 
   const genericComputeStorageBuffer: BindGroupClusterBindingLayout = {
     visibility: GPUShaderStage.COMPUTE,
