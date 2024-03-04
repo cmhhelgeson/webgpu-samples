@@ -19,6 +19,7 @@ const init: SampleInit = async ({ canvas, pageState, gui }) => {
   canvas.width = canvas.clientWidth * devicePixelRatio;
   canvas.height = canvas.clientHeight * devicePixelRatio;
   const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+  device.limits.ma
 
   context.configure({
     device,
