@@ -1,4 +1,6 @@
 @group(0) @binding(0) var<storage, read_write> vertex_info: array<f32>;
+@group(0) @binding(1) var<storage, read_write> prev_positions: array<f32>;
+@group(0)
 // Edge Info
 @group(1) @binding(0) var<storage, read> edge_ids: array<vec2u>;
 @group(1) @binding(1) var<storage, read> edge_lengths: array<f32>;
@@ -8,9 +10,9 @@
 @group(2) @binding(0) var<uniform> uniforms: Uniforms;
 
 
-// Run for each vertex
+// Run for each vertex/particle
 fn postSolve() {
-  if (inverse_mass[global_id.x] == 0.0) {
+  if (inverse_masses[global_id.x] == 0.0) {
     continue;
   }
   velocities[global_id.x] = (
