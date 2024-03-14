@@ -1,8 +1,11 @@
 
 // Alligned to eight vec3 pos, vec3 normal, vec3 uv
-var<storage, read_write> vertices: array<f32>;
-var<storge, read_write> velocites: array<vec2<f32>>;
-var<storage, read_write> prev_positions: array<vec4<f32>>;
+@group(0) @binding(0) var<storage, read_write> vertex_info: array<f32>;
+// vec3<f32s> positions we read in as f32s to prevent allignment issues
+@group(0) @binding(1) var<storage, read_write> prev_positions: array<f32>;
+@group(0) @binding(2) var<storage, read_write> velocites: array<vec2f>;
+// delta_time, edge_compliance, volume_compliance
+@group(2) @binding(0) var<uniform> uniforms: Uniforms;
 
 vecAdd(velocities, i, gravity, 0, dt)
 

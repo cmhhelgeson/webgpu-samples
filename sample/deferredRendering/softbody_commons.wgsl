@@ -1,3 +1,9 @@
+struct Uniforms {
+  delta_time: f32,
+  edge_compliance: f32,
+  volume_compliance: f32,
+}
+
 const VOLUME_ID_ORDER: array<vec3<u32>, 4> = [
   vec3u(1, 3, 2),
   vec3u(0, 2, 3),

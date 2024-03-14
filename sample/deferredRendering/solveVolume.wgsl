@@ -1,4 +1,13 @@
-// for each tet
+// Vertex Info
+@group(0) @binding(0) var<storage, read_write> vertex_info: array<f32>;
+// Volume Info
+@group(1) @binding(2) var<storage, read> tet_volume_ids: array<vec4u>;
+@group(1) @binding(3) var<storage, read> tet_volumes: array<f32>;
+
+@group(1) @binding(4) var<storage, read> inverse_masses: array<?>
+// Uniforms
+@group(2) @binding(0) var<uniform> uniforms: Uniforms;
+
 
 var<storage, read> tet_volume_ids: array<vec4<u32>>;
 var<storage, read> inverse_mass: array<f32>;

@@ -1,6 +1,11 @@
+@group(0) @binding(0) var<storage, read_write> vertex_info: array<f32>;
+// Edge Info
+@group(1) @binding(0) var<storage, read> edge_ids: array<vec2u>;
+@group(1) @binding(1) var<storage, read> edge_lengths: array<f32>;
 
-
-fn setVertexNormal(vertex_index: u32, value: u32) 
+@group(1) @binding(4) var<storage, read> inverse_masses: array<?>
+// Uniforms
+@group(2) @binding(0) var<uniform> uniforms: Uniforms;
 
 
 // Run for each vertex
