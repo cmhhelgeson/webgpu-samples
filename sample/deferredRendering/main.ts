@@ -1,6 +1,6 @@
 import { mat4, vec3, vec4 } from 'wgpu-matrix';
 import { GUI } from 'dat.gui';
-import { mesh } from '../../meshes/stanfordDragon';
+import { mesh } from '../../meshes/bunny';
 
 import lightUpdate from './lightUpdate.wgsl';
 import vertexWriteGBuffers from './vertexWriteGBuffers.wgsl';
@@ -477,24 +477,33 @@ const projectionMatrix = mat4.perspective((2 * Math.PI) / 5, aspect, 1, 2000.0);
 // Move the model so it's centered.
 const modelMatrix = mat4.translation([0, -45, 0]);
 
-const modelData = modelMatrix as Float32Array;
-device.queue.writeBuffer(
-  modelUniformBuffer,
-  0,
-  modelData.buffer,
-  modelData.byteOffset,
-  modelData.byteLength
-);
-const invertTransposeModelMatrix = mat4.invert(modelMatrix);
-mat4.transpose(invertTransposeModelMatrix, invertTransposeModelMatrix);
-const normalModelData = invertTransposeModelMatrix as Float32Array;
-device.queue.writeBuffer(
-  modelUniformBuffer,
-  64,
-  normalModelData.buffer,
-  normalModelData.byteOffset,
-  normalModelData.byteLength
-);
+function writeToModelUniformBuffer(device: GPUDevice) {
+  // Rotate and translate model matrix
+  const modelMatrix = mat4.create();
+  mat4.identity(modelMatrix);
+  const now = Date.now() / 1000;
+  mat4.translate(modelMatrix, [0, -45, 0], modelMatrix);
+  // Write model matrix to buffer
+  const modelData = modelMatrix as Float32Array;
+  device.queue.writeBuffer(
+    modelUniformBuffer,
+    0,
+    modelData.buffer,
+    modelData.byteOffset,
+    modelData.byteLength
+  );
+  // Write inverse model matrix to buffer
+  const invertTransposeModelMatrix = mat4.invert(modelMatrix);
+  mat4.transpose(invertTransposeModelMatrix, invertTransposeModelMatrix);
+  const normalModelData = invertTransposeModelMatrix as Float32Array;
+  device.queue.writeBuffer(
+    modelUniformBuffer,
+    64,
+    normalModelData.buffer,
+    normalModelData.byteOffset,
+    normalModelData.byteLength
+  );
+}
 
 // Rotates the camera around the origin based on time.
 function getCameraViewProjMatrix() {
@@ -508,6 +517,7 @@ function getCameraViewProjMatrix() {
 }
 
 function frame() {
+  writeToModelUniformBuffer(device);
   const cameraViewProj = getCameraViewProjMatrix();
   device.queue.writeBuffer(
     cameraUniformBuffer,
