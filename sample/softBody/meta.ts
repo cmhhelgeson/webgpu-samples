@@ -1,0 +1,20 @@
+export default {
+  name: 'Soft Body XPCD Simulation',
+  description: `WIP`,
+  filename: __DIRNAME__,
+  sources: [
+    { path: 'main.ts' },
+    { path: 'vertexWriteGBuffers.wgsl' },
+    { path: 'fragmentWriteGBuffers.wgsl' },
+    { path: 'vertexTextureQuad.wgsl' },
+    { path: 'fragmentGBuffersDebugView.wgsl' },
+    { path: 'fragmentDeferredRendering.wgsl' },
+    { path: 'lightUpdate.wgsl' },
+    { path: 'softbody.ts' },
+    { path: 'preSolve.wgsl' },
+    { path: 'solveEdge.wgsl' },
+    { path: 'solveVolume.wgsl' },
+    { path: 'postSolve.wgsl' },
+    { path: 'commons.wgsl' },
+  ],
+};

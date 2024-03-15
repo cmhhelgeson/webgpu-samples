@@ -33,9 +33,9 @@ const convertToVec3Positions = (arr: number[]): [number, number, number][] => {
 
 
 const positions = convertToVec3Positions(bunnyRawData.positions);
-const triangles = convertNumberArrToVec(bunnyRawData.indices, 3);
-const tetEdgeIds = convertNumberArrToVec(bunnyRawData.tetEdgeIds, 2);
-const tetVolumeIds = convertNumberArrToVec(bunnyRawData.tetIds, 4)
+const triangles = convertNumberArrToVec(bunnyRawData.indices, 3) as [number, number, number][];
+const tetEdgeIds = convertNumberArrToVec(bunnyRawData.tetEdgeIds, 2) as [number, number][];
+const tetVolumeIds = convertNumberArrToVec(bunnyRawData.tetIds, 4) as [number, number, number, number][];
 const normals = computeSurfaceNormals(positions, triangles as [number, number, number][]);
 const uvs = computeProjectedPlaneUVs(positions, 'xy');
   
