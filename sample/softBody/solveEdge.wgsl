@@ -4,7 +4,7 @@
 @group(1) @binding(0) var<storage, read> edge_ids: array<vec2u>;
 @group(1) @binding(1) var<storage, read> edge_lengths: array<f32>;
 
-@group(1) @binding(4) var<storage, read> inverse_masses: array<?>
+@group(1) @binding(4) var<storage, read> inverse_masses: array<vec4f>;
 // Uniforms
 @group(2) @binding(0) var<uniform> uniforms: Uniforms;
 

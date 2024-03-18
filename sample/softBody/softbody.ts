@@ -1,6 +1,6 @@
 import presolveWGSL from './presolve.wgsl';
 import solveEdgeWGSL from './solveEdge.wgsl';
-import solveVolumeWGSL from './solveVolumes.wgsl';
+import solveVolumeWGSL from './solveVolume.wgsl';
 import postSolveWGSL from './postSolve.wgsl';
 import commonsWGSL from './commons.wgsl';
 import { Vec3, vec3 } from 'wgpu-matrix';
@@ -247,6 +247,7 @@ export class SoftBodyMesh {
         label: `SoftBody.computePipeline.${entryPoint}`,
         compute: {
           module: device.createShaderModule({
+            label: `SoftBody.computeShader.${entryPoint}`,
             code: commonsWGSL + code,
           }),
           entryPoint,
@@ -280,6 +281,7 @@ export class SoftBodyMesh {
 
     // Now the buffer that represents the vertex positions for the current frame
     this.vertexBuffer = device.createBuffer({
+      label: 'SoftBody.vertexBuffer',
       // position: vec3, normal: vec3, uv: vec2
       size: this.numVertices * 8 * Float32Array.BYTES_PER_ELEMENT,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE,
@@ -320,6 +322,7 @@ export class SoftBodyMesh {
     ];
     // Create a buffer that represents the vertices positions on the last frame
     this.prevPositionsBuffer = device.createBuffer({
+      label: 'SoftBody.storageBuffer.prevPositions',
       // Prev positions represented as a vec3 but accessed as f32s for vertex allignment
       size: this.numVertices * Float32Array.BYTES_PER_ELEMENT * 3,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
@@ -327,6 +330,7 @@ export class SoftBodyMesh {
 
     //Create a buffer that represents the 3D velocities of each vertex
     this.velocitiesBuffer = device.createBuffer({
+      label: 'SoftBody.storageBuffer.velocities',
       size: this.numVertices * Float32Array.BYTES_PER_ELEMENT * 3,
       usage: GPUBufferUsage.STORAGE,
     });
@@ -334,6 +338,7 @@ export class SoftBodyMesh {
     // Create index buffers
     this.indexCount = mesh.triangles.length * 3;
     this.indexBuffer = device.createBuffer({
+      label: 'SoftBody.indexBuffer',
       size: this.indexCount * Uint16Array.BYTES_PER_ELEMENT,
       usage: GPUBufferUsage.INDEX,
       mappedAtCreation: true,
@@ -351,15 +356,14 @@ export class SoftBodyMesh {
 
     // Store the tetrahedron edge ids
     this.tetEdgeIdsBuffer = device.createBuffer({
+      label: 'SoftBody.storageBuffer.tetEdgeIds',
       // Vec2f. 2 ids per edge for 2 vertices it is composed of
       size: this.numEdges * 2 * Uint32Array.BYTES_PER_ELEMENT,
       usage: GPUBufferUsage.STORAGE,
       mappedAtCreation: true,
     });
     {
-      const mapping = new Uint32Array(
-        this.restEdgeLengthsBuffer.getMappedRange()
-      );
+      const mapping = new Uint32Array(this.tetEdgeIdsBuffer.getMappedRange());
       // For each edge, set its vertex ids
       for (let i = 0; i < this.numEdges; i++) {
         mapping.set(mesh.tetEdgeIds[i], i * 2);
@@ -370,6 +374,7 @@ export class SoftBodyMesh {
     // Store the lengths of each tetrahedron edge
     this.restEdgeLengthsBuffer = device.createBuffer({
       // One length per edge
+      label: 'SoftBody.storageBuffer.restEdgeLengths',
       size: this.numEdges * Float32Array.BYTES_PER_ELEMENT,
       usage: GPUBufferUsage.STORAGE,
       mappedAtCreation: true,
@@ -395,13 +400,14 @@ export class SoftBodyMesh {
 
     // Store the tetrahedron volume ids
     this.tetVolumeIdsBuffer = device.createBuffer({
+      label: 'SoftBody.storageBuffer.tetVolumeIds',
       // Vec4: 4 vertices per tet
       size: Uint32Array.BYTES_PER_ELEMENT * 4 * this.numTets,
       usage: GPUBufferUsage.STORAGE,
       mappedAtCreation: true,
     });
     {
-      const mapping = new Uint32Array(this.indexBuffer.getMappedRange());
+      const mapping = new Uint32Array(this.tetVolumeIdsBuffer.getMappedRange());
       for (let i = 0; i < this.numTets; ++i) {
         mapping.set(mesh.tetVolumeIds[i], 4 * i);
       }
@@ -410,11 +416,13 @@ export class SoftBodyMesh {
 
     // Store the tetrahedron volumes and inverseMass
     this.restVolumeBuffer = device.createBuffer({
+      label: 'SoftBody.storageBuffer.restVolume',
       size: Float32Array.BYTES_PER_ELEMENT * this.numTets,
       usage: GPUBufferUsage.STORAGE,
       mappedAtCreation: true,
     });
     this.inverseMassBuffer = device.createBuffer({
+      label: 'SoftBody.storageBuffer.inverseMass',
       size: Float32Array.BYTES_PER_ELEMENT * 4 * this.numTets,
       usage: GPUBufferUsage.STORAGE,
       mappedAtCreation: true,

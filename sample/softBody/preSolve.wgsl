@@ -18,9 +18,9 @@ fn preSolve(
   let current_pos = getVertexPosition(global_id.x);
   setPrevPosition(global_id.x, current_pos);
   // Set previous positions to current_position
-  let pos_x = &vertices[global_id.x * 8];
-  let pos_y = &vertices[global_id.x * 8 + 1];
-  let pos_z = &vertices[global_id.x * 8 + 2];
+  let pos_x = &vertex_info[global_id.x * 8];
+  let pos_y = &vertex_info[global_id.x * 8 + 1];
+  let pos_z = &vertex_info[global_id.x * 8 + 2];
   prev_positions[global_id.x] = vec4f((*pos_x),(*pos_y),(*pos_z), 1.0);
 
   // Add new velocity to current position

@@ -13,7 +13,10 @@ var<storage, read> tet_volume_ids: array<vec4<u32>>;
 var<storage, read> inverse_mass: array<f32>;
 
 // Executed once per tetrahedron
-fn solveVolumes() -> {
+@compute @workgroup_size(64)
+fn solveVolume(
+  @builtin(global_invocation_id) global_id : vec3u
+) -> {
     var w = 0.0;
     let gradients: array<vec3f, 4> = [
         vec3f(0.0, 0.0, 0.0),

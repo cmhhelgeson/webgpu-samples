@@ -1,6 +1,6 @@
 import presolveWGSL from './presolve.wgsl';
 import solveEdgeWGSL from './solveEdge.wgsl';
-import solveVolumeWGSL from './solveVolumes.wgsl';
+import solveVolumeWGSL from './solveVolume.wgsl';
 import postSolveWGSL from './postSolve.wgsl';
 import { Vec3, vec3 } from 'wgpu-matrix';
 
@@ -17,9 +17,9 @@ interface SoftBodyMeshConstructorArgs {
 }
 
 interface UniformArgs {
-  deltaTime: number,
-  edgeCompliance: number,
-  volumeCompliance: number,
+  deltaTime: number;
+  edgeCompliance: number;
+  volumeCompliance: number;
 }
 
 const createReadOnlyStorageLayoutEntry = (
@@ -58,7 +58,7 @@ const createBindGroupBufferEntry = (
   };
 };
 
-class SoftBodyMesh {
+export class SoftBodyMesh {
   // Per vertex information (corresponds to writableBindGroup)
   public numVertices: number;
   // Vec3 position, vec3 normal, vec2 uv
@@ -207,9 +207,10 @@ class SoftBodyMesh {
   private createUniformBindGroup(device: GPUDevice) {
     // delta_time, edge_compliance, volume_compliance
     this.uniformsBuffer = device.createBuffer({
+      label: 'SoftBody.unifromsBuffer',
       size: Float32Array.BYTES_PER_ELEMENT * 3,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    })
+    });
     // Bind Group Resources
     this.uniformBindGroupLayout = device.createBindGroupLayout({
       label: 'SoftBody.bindGroupLayout.uniforms',
@@ -218,9 +219,9 @@ class SoftBodyMesh {
           binding: 0,
           visibility: GPUShaderStage.COMPUTE,
           buffer: {
-            type: 'uniform'
-          }
-        }
+            type: 'uniform',
+          },
+        },
       ],
     });
     this.uniformBindGroup = device.createBindGroup({
@@ -230,11 +231,11 @@ class SoftBodyMesh {
         {
           binding: 0,
           resource: {
-            buffer: this.uniformsBuffer
-          }
-        }
+            buffer: this.uniformsBuffer,
+          },
+        },
       ],
-    })
+    });
   }
 
   private createSoftBodyComputePipelines(device: GPUDevice) {
@@ -277,8 +278,9 @@ class SoftBodyMesh {
     const vertexStride = 8;
     this.numVertices = mesh.positions.length;
 
-    // Now the buffer that represents the vertex positions for the current frame
+    // Vertex buffer with per vertex info. Acts as both vertex buffer and storage compute buffer
     this.vertexBuffer = device.createBuffer({
+      label: 'SoftBody.vertexBuffer',
       // position: vec3, normal: vec3, uv: vec2
       size: this.numVertices * 8 * Float32Array.BYTES_PER_ELEMENT,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE,
@@ -320,12 +322,14 @@ class SoftBodyMesh {
     // Create a buffer that represents the vertices positions on the last frame
     this.prevPositionsBuffer = device.createBuffer({
       // Prev positions represented as a vec3 but accessed as f32s for vertex allignment
+      label: 'SoftBody.storageBuffer.prevPostions',
       size: this.numVertices * Float32Array.BYTES_PER_ELEMENT * 3,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
     });
 
     //Create a buffer that represents the 3D velocities of each vertex
     this.velocitiesBuffer = device.createBuffer({
+      label: 'SoftBody.storageBuffer.velocities',
       size: this.numVertices * Float32Array.BYTES_PER_ELEMENT * 3,
       usage: GPUBufferUsage.STORAGE,
     });
@@ -333,6 +337,7 @@ class SoftBodyMesh {
     // Create index buffers
     this.indexCount = mesh.triangles.length * 3;
     this.indexBuffer = device.createBuffer({
+      label: 'SoftBody.indexBuffer',
       size: this.indexCount * Uint16Array.BYTES_PER_ELEMENT,
       usage: GPUBufferUsage.INDEX,
       mappedAtCreation: true,
@@ -351,13 +356,14 @@ class SoftBodyMesh {
     // Store the tetrahedron edge ids
     this.tetEdgeIdsBuffer = device.createBuffer({
       // Vec2f. 2 ids per edge for 2 vertices it is composed of
+      label: 'SoftBody.storageBuffer.tetEdgeIds',
       size: this.numEdges * 2 * Uint32Array.BYTES_PER_ELEMENT,
       usage: GPUBufferUsage.STORAGE,
       mappedAtCreation: true,
     });
     {
       const mapping = new Uint32Array(
-        this.restEdgeLengthsBuffer.getMappedRange()
+        this.tetEdgeIdsBuffer.getMappedRange()
       );
       // For each edge, set its vertex ids
       for (let i = 0; i < this.numEdges; i++) {
@@ -369,6 +375,7 @@ class SoftBodyMesh {
     // Store the lengths of each tetrahedron edge
     this.restEdgeLengthsBuffer = device.createBuffer({
       // One length per edge
+      label: 'SoftBody.storageBuffer.restEdgeLengths',
       size: this.numEdges * Float32Array.BYTES_PER_ELEMENT,
       usage: GPUBufferUsage.STORAGE,
       mappedAtCreation: true,
@@ -395,25 +402,28 @@ class SoftBodyMesh {
     // Store the tetrahedron volume ids
     this.tetVolumeIdsBuffer = device.createBuffer({
       // Vec4: 4 vertices per tet
+      label: 'SoftBody.storageBuffer.tetVolumeIds',
       size: Uint32Array.BYTES_PER_ELEMENT * 4 * this.numTets,
       usage: GPUBufferUsage.STORAGE,
       mappedAtCreation: true,
     });
     {
-      const mapping = new Uint32Array(this.indexBuffer.getMappedRange());
+      const mapping = new Uint32Array(this.tetVolumeIdsBuffer.getMappedRange());
       for (let i = 0; i < this.numTets; ++i) {
         mapping.set(mesh.tetVolumeIds[i], 4 * i);
       }
-      this.indexBuffer.unmap();
+      this.tetVolumeIdsBuffer.unmap();
     }
 
     // Store the tetrahedron volumes and inverseMass
     this.restVolumeBuffer = device.createBuffer({
+      label: 'SoftBody.storageBuffer.restVolume',
       size: Float32Array.BYTES_PER_ELEMENT * this.numTets,
       usage: GPUBufferUsage.STORAGE,
       mappedAtCreation: true,
     });
     this.inverseMassBuffer = device.createBuffer({
+      label: 'SoftBody.storageBuffer.inverseMass',
       size: Float32Array.BYTES_PER_ELEMENT * 4 * this.numTets,
       usage: GPUBufferUsage.STORAGE,
       mappedAtCreation: true,
@@ -446,8 +456,18 @@ class SoftBodyMesh {
   }
 
   setup(device: GPUDevice, args: UniformArgs) {
-    const writableArgs = new Float32Array([args.deltaTime, args.edgeCompliance, args.volumeCompliance])
-    device.queue.writeBuffer(this.uniformsBuffer, 0, writableArgs.buffer, writableArgs.byteOffset, writableArgs.byteLength)
+    const writableArgs = new Float32Array([
+      args.deltaTime,
+      args.edgeCompliance,
+      args.volumeCompliance,
+    ]);
+    device.queue.writeBuffer(
+      this.uniformsBuffer,
+      0,
+      writableArgs.buffer,
+      writableArgs.byteOffset,
+      writableArgs.byteLength
+    );
   }
 
   // Run the computePipelines

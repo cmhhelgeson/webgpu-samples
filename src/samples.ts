@@ -28,6 +28,7 @@ import rotatingCube from '../sample/rotatingCube/meta';
 import samplerParameters from '../sample/samplerParameters/meta';
 import shadowMapping from '../sample/shadowMapping/meta';
 import skinnedMesh from '../sample/skinnedMesh/meta';
+import softBody from '../sample/softBody/meta';
 import spookyball from '../sample/spookyball/meta';
 import textRenderingMsdf from '../sample/textRenderingMsdf/meta';
 import texturedCube from '../sample/texturedCube/meta';
@@ -121,6 +122,7 @@ export const pageCategories: PageCategory[] = [
       'a-buffer': aBuffer,
       skinnedMesh,
       textRenderingMsdf,
+      softBody,
     },
   },
 

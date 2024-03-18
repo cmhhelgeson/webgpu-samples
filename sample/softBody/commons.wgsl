@@ -4,12 +4,12 @@ struct Uniforms {
   volume_compliance: f32,
 }
 
-const VOLUME_ID_ORDER: array<vec3<u32>, 4> = [
+const VOLUME_ID_ORDER: array<vec3u, 4> = array<vec3u, 4>(
   vec3u(1, 3, 2),
   vec3u(0, 2, 3),
   vec3u(0, 3, 1),
   vec3u(0, 1, 2)
-];
+);
 
 // Prev Positions are composed into vec3 from 3 byte elements
 fn getPrevPosition(index: u32) -> vec3f {
@@ -21,7 +21,7 @@ fn getPrevPosition(index: u32) -> vec3f {
 }
 
 fn setPrevPosition(index: u32, new_pos: vec3f) {
-  prev_positions[i * 3] = new_pos.x
+  prev_positions[i * 3] = new_pos.x;
   prev_positions[i * 3 + 1] = new_pos.y;
   prev_positions[i * 3 + 2] = new_pos.z;
 }

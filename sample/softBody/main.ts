@@ -416,7 +416,7 @@ const lightsBufferComputeBindGroup = device.createBindGroup({
 //--------------------
 
 // Scene matrices
-const eyePosition = vec3.fromValues(0, 50, -100);
+const eyePosition = vec3.fromValues(0, 2, -100);
 const upVector = vec3.fromValues(0, 1, 0);
 const origin = vec3.fromValues(0, 0, 0);
 

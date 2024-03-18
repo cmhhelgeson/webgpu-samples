@@ -15,7 +15,10 @@ var<storage, read> edge_lengths: array<f32>;
 
 
 // Executed once per edge length
-fn solveEdges() {
+@compute @workgroup_size(64)
+fn solveEdge(
+  @builtin(global_invocation_id) global_id : vec3u
+) {
   let alpha = uniforms.edge_compliance / uniforms.delta_time / uniforms.delta_time;
   let edge = edge_ids[global_id.x];
   let w0 = this.inverse_mass[edge.x];

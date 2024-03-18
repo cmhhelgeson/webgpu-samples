@@ -7,18 +7,16 @@
 // delta_time, edge_compliance, volume_compliance
 @group(2) @binding(0) var<uniform> uniforms: Uniforms;
 
-vecAdd(velocities, i, gravity, 0, dt)
-
-velocities[i * 3] = gravity[0] * deltaTime
-velocities[i * 3 + 1] = gravity[1] * deltaTime
-velocities[i * 3 + 2] = gravity[2] * deltaTime
-
-
 // Executed once per vertex
-fn presolve() -> {
+@compute @workgroup_size(64)
+fn preSolve(
+  @builtin(global_invocation_id) global_id : vec3u
+) -> {
   //Apply gravity to current velocity
   let current_velocity = &velocities[global_id.x];
   (*current_velocity).y += gravity.y * uniforms.delta_time;
+  let current_pos = getVertexPosition(global_id.x);
+  setPrevPosition(global_id.x, current_pos);
   // Set previous positions to current_position
   let pos_x = &vertices[global_id.x * 8];
   let pos_y = &vertices[global_id.x * 8 + 1];
@@ -26,9 +24,12 @@ fn presolve() -> {
   prev_positions[global_id.x] = vec4f((*pos_x),(*pos_y),(*pos_z), 1.0);
 
   // Add new velocity to current position
+  setVertexPosition(global_id.x, velocities[global_id.x] * uniforms.delta_time)
+  /*
   (*pos_x) += (*current_velocity).x * uniforms.delta_time;
   (*pos_y) += (*current_velocity).y * uniforms.delta_time;
-  (*pos_z) += (*current_velocity).z * uniforms.delta_time;
+  (*pos_z) += (*current_velocity).z * uniforms.delta_time; 
+  */
 
   // If our y position is less than the value of the floor
   if ((*pos_y) < 0.0) {

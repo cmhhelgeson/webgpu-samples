@@ -3,8 +3,8 @@
 // Volume Info
 @group(1) @binding(2) var<storage, read> tet_volume_ids: array<vec4u>;
 @group(1) @binding(3) var<storage, read> tet_volumes: array<f32>;
-
-@group(1) @binding(4) var<storage, read> inverse_masses: array<?>
+// Inverse Mass
+@group(1) @binding(4) var<storage, read> inverse_masses: array<vec4f>;
 // Uniforms
 @group(2) @binding(0) var<uniform> uniforms: Uniforms;
 
@@ -18,26 +18,26 @@ fn solveVolume(
   @builtin(global_invocation_id) global_id : vec3u
 ) -> {
     var w = 0.0;
-    let gradients: array<vec3f, 4> = [
+    let gradients: array<vec3f, 4> = array<vec3f, 4>(
         vec3f(0.0, 0.0, 0.0),
         vec3f(0.0, 0.0, 0.0),
         vec3f(0.0, 0.0, 0.0),
         vec3f(0.0, 0.0, 0.0)
-    ];
+    );
     for (var i = 0; i < 4; i++) {
-        let tet = tet_volume_ids[i];
+      let tet = tet_volume_ids[i];
 
-        let vertex0 = tet[VOLUME_ID_ORDER[i][0]];
-        let vertex1 = tet[VOLUME_ID_ORDER[i][1]];
-        let vertex2 = tet[VOLUME_ID_ORDER[i][2]];
+      let vertex0 = tet[VOLUME_ID_ORDER[i][0]];
+      let vertex1 = tet[VOLUME_ID_ORDER[i][1]];
+      let vertex2 = tet[VOLUME_ID_ORDER[i][2]];
 
-        let temp0 = getVertexPosition(vertex1) - getVertexPosition(vertex0);
-        let temp1 = getVertexPosition(vertex2) - getVertexPosition(vertex0);
+      let temp0 = getVertexPosition(vertex1) - getVertexPosition(vertex0);
+      let temp1 = getVertexPosition(vertex2) - getVertexPosition(vertex0);
 
-        gradients[j] = cross(temp1, temp0);
-        gradients[j] /= 6.0;
+      gradients[j] = cross(temp1, temp0);
+      gradients[j] /= 6.0;
 
-        w += inverse_mass[tet[j]] * dot(gradients[j], gradients[j]);
+      w += inverse_mass[tet[j]] * dot(gradients[j], gradients[j]);
     }
 
     if (w == 0.0) {
