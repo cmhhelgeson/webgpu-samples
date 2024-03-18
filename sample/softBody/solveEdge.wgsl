@@ -1,35 +1,31 @@
 // Vertex Positions
 @group(0) @binding(0) var<storage, read_write> vertex_info: array<f32>;
+@group(0) @binding(1) var<storage, read_write> prev_positions: array<f32>;
 // Edge Info
 @group(1) @binding(0) var<storage, read> edge_ids: array<vec2u>;
 @group(1) @binding(1) var<storage, read> edge_lengths: array<f32>;
 
-@group(1) @binding(4) var<storage, read> inverse_masses: array<vec4f>;
+// Masses 
+@group(1) @binding(4) var<storage, read> inverse_masses: array<f32>;
 // Uniforms
 @group(2) @binding(0) var<uniform> uniforms: Uniforms;
 
-
-var<storage, read> edge_ids: array<vec2u>;
-var<storage, read> inverse_mass: array<f32>;
-var<storage, read> edge_lengths: array<f32>;
-
-
-// Executed once per edge length
+// Run once per edge
 @compute @workgroup_size(64)
 fn solveEdge(
   @builtin(global_invocation_id) global_id : vec3u
 ) {
   let alpha = uniforms.edge_compliance / uniforms.delta_time / uniforms.delta_time;
   let edge = edge_ids[global_id.x];
-  let w0 = this.inverse_mass[edge.x];
-  let w1 = this.inverse_mass[edge.y];
+  let w0 = inverse_masses[edge.x];
+  let w1 = inverse_masses[edge.y];
 
   let w = w0 + w1;
   if (w == 0.0) {
     return;
   }
 
-  let gradient = getVertexPosition(edge.x) - getVertexPosition(edge.y);
+  var gradient = getVertexPosition(edge.x) - getVertexPosition(edge.y);
   let sqr_len = dot(gradient, gradient);
   let len = sqrt(sqr_len);
   if (len == 0.0) {

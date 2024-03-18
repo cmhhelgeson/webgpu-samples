@@ -208,6 +208,7 @@ export class SoftBodyMesh {
   private createUniformBindGroup(device: GPUDevice) {
     // delta_time, edge_compliance, volume_compliance
     this.uniformsBuffer = device.createBuffer({
+      label: 'SoftBody.unifromsBuffer',
       size: Float32Array.BYTES_PER_ELEMENT * 3,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
@@ -247,7 +248,7 @@ export class SoftBodyMesh {
         label: `SoftBody.computePipeline.${entryPoint}`,
         compute: {
           module: device.createShaderModule({
-            label: `SoftBody.computeShader.${entryPoint}`,
+            label: `Softbody.computeShader.${entryPoint}`,
             code: commonsWGSL + code,
           }),
           entryPoint,
@@ -279,7 +280,7 @@ export class SoftBodyMesh {
     const vertexStride = 8;
     this.numVertices = mesh.positions.length;
 
-    // Now the buffer that represents the vertex positions for the current frame
+    // Vertex buffer with per vertex info. Acts as both vertex buffer and storage compute buffer
     this.vertexBuffer = device.createBuffer({
       label: 'SoftBody.vertexBuffer',
       // position: vec3, normal: vec3, uv: vec2
@@ -322,8 +323,8 @@ export class SoftBodyMesh {
     ];
     // Create a buffer that represents the vertices positions on the last frame
     this.prevPositionsBuffer = device.createBuffer({
-      label: 'SoftBody.storageBuffer.prevPositions',
       // Prev positions represented as a vec3 but accessed as f32s for vertex allignment
+      label: 'SoftBody.storageBuffer.prevPostions',
       size: this.numVertices * Float32Array.BYTES_PER_ELEMENT * 3,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
     });
@@ -356,14 +357,16 @@ export class SoftBodyMesh {
 
     // Store the tetrahedron edge ids
     this.tetEdgeIdsBuffer = device.createBuffer({
-      label: 'SoftBody.storageBuffer.tetEdgeIds',
       // Vec2f. 2 ids per edge for 2 vertices it is composed of
+      label: 'SoftBody.storageBuffer.tetEdgeIds',
       size: this.numEdges * 2 * Uint32Array.BYTES_PER_ELEMENT,
       usage: GPUBufferUsage.STORAGE,
       mappedAtCreation: true,
     });
     {
-      const mapping = new Uint32Array(this.tetEdgeIdsBuffer.getMappedRange());
+      const mapping = new Uint32Array(
+        this.tetEdgeIdsBuffer.getMappedRange()
+      );
       // For each edge, set its vertex ids
       for (let i = 0; i < this.numEdges; i++) {
         mapping.set(mesh.tetEdgeIds[i], i * 2);
@@ -400,8 +403,8 @@ export class SoftBodyMesh {
 
     // Store the tetrahedron volume ids
     this.tetVolumeIdsBuffer = device.createBuffer({
-      label: 'SoftBody.storageBuffer.tetVolumeIds',
       // Vec4: 4 vertices per tet
+      label: 'SoftBody.storageBuffer.tetVolumeIds',
       size: Uint32Array.BYTES_PER_ELEMENT * 4 * this.numTets,
       usage: GPUBufferUsage.STORAGE,
       mappedAtCreation: true,
@@ -411,7 +414,7 @@ export class SoftBodyMesh {
       for (let i = 0; i < this.numTets; ++i) {
         mapping.set(mesh.tetVolumeIds[i], 4 * i);
       }
-      this.indexBuffer.unmap();
+      this.tetVolumeIdsBuffer.unmap();
     }
 
     // Store the tetrahedron volumes and inverseMass
@@ -423,6 +426,7 @@ export class SoftBodyMesh {
     });
     this.inverseMassBuffer = device.createBuffer({
       label: 'SoftBody.storageBuffer.inverseMass',
+      // 4 masses for each tet, one mass per vertex
       size: Float32Array.BYTES_PER_ELEMENT * 4 * this.numTets,
       usage: GPUBufferUsage.STORAGE,
       mappedAtCreation: true,
@@ -435,17 +439,23 @@ export class SoftBodyMesh {
         this.inverseMassBuffer.getMappedRange()
       );
       for (let i = 0; i < this.numTets; i++) {
+        // Set the mass of each tetrahedron
         const volume = this.getTetrahedronVolume(
           mesh.positions,
           i,
           mesh.tetVolumeIds
         );
         restVolMapping.set([volume], i);
+        // Set the inverseMass of the vertices of the current tetrahedron
         const inverseMass = volume > 0.0 ? 1.0 / (volume / 4.0) : 0.0;
-        inverseMassMapping.set(
-          [inverseMass, inverseMass, inverseMass, inverseMass],
-          i * 4
-        );
+        const tetVertIdx = mesh.tetVolumeIds[i];
+        // Individually set inverse mass of each vertex specified by the indices
+        // provided by the tetrahedron (i.e we do not iterate set inverseMass by iterating
+        // linearly through the buffer)
+        inverseMassMapping.set([inverseMass], tetVertIdx[0]);
+        inverseMassMapping.set([inverseMass], tetVertIdx[1]);
+        inverseMassMapping.set([inverseMass], tetVertIdx[2]);
+        inverseMassMapping.set([inverseMass], tetVertIdx[3]);
       }
       this.restVolumeBuffer.unmap();
       this.inverseMassBuffer.unmap();
@@ -484,27 +494,23 @@ export class SoftBodyMesh {
     preSolvePassEncoder.setPipeline(this.preSolvePipeline);
     preSolvePassEncoder.setBindGroup(1, this.readOnlyBindGroup);
     preSolvePassEncoder.dispatchWorkgroups(preSolveDispatches);
-    preSolvePassEncoder.end();
 
     // Solve Edge step
     const solveEdgePassEncoder = commandEncoder.beginComputePass();
     solveEdgePassEncoder.setPipeline(this.solveEdgePipeline);
     solveEdgePassEncoder.setBindGroup(1, this.readOnlyBindGroup);
     solveEdgePassEncoder.dispatchWorkgroups(solveEdgesDispatches);
-    solveEdgePassEncoder.end();
 
     // Solve Volume step
     const solveVolumePassEncoder = commandEncoder.beginComputePass();
-    solveVolumePassEncoder.setPipeline(this.solveVolumePipeline);
-    solveVolumePassEncoder.setBindGroup(1, this.readOnlyBindGroup);
-    solveVolumePassEncoder.dispatchWorkgroups(solveVolumeDispatches);
-    solveVolumePassEncoder.end();
+    solveEdgePassEncoder.setPipeline(this.solveVolumePipeline);
+    solveEdgePassEncoder.setBindGroup(1, this.readOnlyBindGroup);
+    solveEdgePassEncoder.dispatchWorkgroups(solveVolumeDispatches);
 
     // Post Solve step
     const postSolvePassEncoder = commandEncoder.beginComputePass();
     postSolvePassEncoder.setPipeline(this.postSolvePipeline);
     postSolvePassEncoder.setBindGroup(1, this.readOnlyBindGroup);
     postSolvePassEncoder.dispatchWorkgroups(postSolveDispatches);
-    postSolvePassEncoder.end();
   }
 }

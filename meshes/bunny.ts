@@ -24,7 +24,7 @@ const convertToVec3Positions = (arr: number[]): [number, number, number][] => {
     const newArr: [number, number, number][] = [];
     for (let i = 0; i < arr.length; i+= 3) {
         newArr.push([
-            arr[i] * 100, arr[i + 1] * 100, arr[i + 2] * 100
+            arr[i] * 5, arr[i + 1] * 5, arr[i + 2] * 5
         ]);
     }
     return newArr;

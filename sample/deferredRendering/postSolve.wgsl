@@ -1,6 +1,6 @@
 @group(0) @binding(0) var<storage, read_write> vertex_info: array<f32>;
 @group(0) @binding(1) var<storage, read_write> prev_positions: array<f32>;
-@group(0) @binding(2) var<storage, read_write> velocities: array<vec2f>;
+@group(0) @binding(2) var<storage, read_write> velocities: array<vec3f>;
 
 @group(1) @binding(4) var<storage, read> inverse_masses: array<f32>;
 // Uniforms
@@ -16,7 +16,7 @@ fn postSolve(
     return;
   }
   velocities[global_id.x] = (
-    getVertexPosition(global_id.x) - prev_positions[global_id.x]
+    getVertexPosition(global_id.x) - getPrevPosition(global_id.x)
   ) * uniforms.delta_time;
 
   // Do something with normals?

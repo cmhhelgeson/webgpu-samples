@@ -47,7 +47,7 @@ const gBufferTextureAlbedo = device.createTexture({
   usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
   format: 'bgra8unorm',
 });
-console.log('beer');
+console.log('beerk');
 const depthTexture = device.createTexture({
   size: [canvas.width, canvas.height],
   format: 'depth24plus',
@@ -237,6 +237,9 @@ const textureQuadPassDescriptor: GPURenderPassDescriptor = {
 const settings = {
   mode: 'rendering',
   numLights: 128,
+  cameraX: 0,
+  cameraY: 0,
+  cameraZ: 3,
 };
 const configUniformBuffer = (() => {
   const buffer = device.createBuffer({
@@ -261,6 +264,9 @@ gui
       new Uint32Array([settings.numLights])
     );
   });
+gui.add(settings, 'cameraX', -100, 100).step(1);
+gui.add(settings, 'cameraY', -100, 100).step(1)
+gui.add(settings, 'cameraZ', -100, 100).step(1);
 
 const modelUniformBuffer = device.createBuffer({
   size: 4 * 16 * 2, // two 4x4 matrix
@@ -416,7 +422,7 @@ const lightsBufferComputeBindGroup = device.createBindGroup({
 //--------------------
 
 // Scene matrices
-const eyePosition = vec3.fromValues(0, 2, -100);
+//const eyePosition = vec3.fromValues(0, 0, 3);
 const upVector = vec3.fromValues(0, 1, 0);
 const origin = vec3.fromValues(0, 0, 0);
 
@@ -454,11 +460,8 @@ function writeToModelUniformBuffer(device: GPUDevice) {
 
 // Rotates the camera around the origin based on time.
 function getCameraViewProjMatrix() {
-  const rad = Math.PI * (Date.now() / 5000);
-  const rotation = mat4.rotateY(mat4.translation(origin), rad);
-  const rotatedEyePosition = vec3.transformMat4(eyePosition, rotation);
-
-  const viewMatrix = mat4.lookAt(rotatedEyePosition, origin, upVector);
+  const eyePosition = vec3.create(settings.cameraX, settings.cameraY, settings.cameraZ);
+  const viewMatrix = mat4.lookAt(eyePosition, origin, upVector);
 
   return mat4.multiply(projectionMatrix, viewMatrix) as Float32Array;
 }
