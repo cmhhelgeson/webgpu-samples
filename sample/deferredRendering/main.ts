@@ -1,6 +1,6 @@
 import { mat4, vec3, vec4 } from 'wgpu-matrix';
 import { GUI } from 'dat.gui';
-import { mesh } from '../../meshes/bunny';
+import { mesh } from '../../meshes/stanfordDragon';
 
 import lightUpdate from './lightUpdate.wgsl';
 import vertexWriteGBuffers from './vertexWriteGBuffers.wgsl';
@@ -8,7 +8,6 @@ import fragmentWriteGBuffers from './fragmentWriteGBuffers.wgsl';
 import vertexTextureQuad from './vertexTextureQuad.wgsl';
 import fragmentGBuffersDebugView from './fragmentGBuffersDebugView.wgsl';
 import fragmentDeferredRendering from './fragmentDeferredRendering.wgsl';
-import { SoftBodyMesh } from './softbody';
 
 const kMaxNumLights = 1024;
 const lightExtentMin = vec3.fromValues(-50, -30, -50);
@@ -29,11 +28,6 @@ context.configure({
   device,
   format: presentationFormat,
   alphaMode: 'premultiplied',
-});
-
-const bunnySoftBody = new SoftBodyMesh({
-  device,
-  mesh,
 });
 
 // GBuffer texture render targets
