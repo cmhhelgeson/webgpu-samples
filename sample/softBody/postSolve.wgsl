@@ -18,9 +18,5 @@ fn postSolve(
   if (inverse_masses[global_id.x] == 0.0) {
     continue;
   }
-  velocities[global_id.x] = (
-    getVertexPosition(global_id.x) - getPrevPosition(global_id.x)
-  ) * uniforms.delta_time;
 
-  // Do something with normals?
 }
