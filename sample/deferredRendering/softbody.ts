@@ -2,6 +2,7 @@ import presolveWGSL from './presolve.wgsl';
 import solveEdgeWGSL from './solveEdge.wgsl';
 import solveVolumeWGSL from './solveVolume.wgsl';
 import postSolveWGSL from './postSolve.wgsl';
+import commonsWGSL from './commons.wgsl';
 import { Vec3, vec3 } from 'wgpu-matrix';
 
 interface SoftBodyMeshConstructorArgs {
@@ -247,7 +248,8 @@ export class SoftBodyMesh {
         label: `SoftBody.computePipeline.${entryPoint}`,
         compute: {
           module: device.createShaderModule({
-            code: code,
+            label: `Softbody.computeShader.${entryPoint}`,
+            code: commonsWGSL + code,
           }),
           entryPoint,
         },
@@ -424,6 +426,7 @@ export class SoftBodyMesh {
     });
     this.inverseMassBuffer = device.createBuffer({
       label: 'SoftBody.storageBuffer.inverseMass',
+      // 4 masses for each tet, one mass per vertex
       size: Float32Array.BYTES_PER_ELEMENT * 4 * this.numTets,
       usage: GPUBufferUsage.STORAGE,
       mappedAtCreation: true,
@@ -436,17 +439,23 @@ export class SoftBodyMesh {
         this.inverseMassBuffer.getMappedRange()
       );
       for (let i = 0; i < this.numTets; i++) {
+        // Set the mass of each tetrahedron
         const volume = this.getTetrahedronVolume(
           mesh.positions,
           i,
           mesh.tetVolumeIds
         );
         restVolMapping.set([volume], i);
+        // Set the inverseMass of the vertices of the current tetrahedron
         const inverseMass = volume > 0.0 ? 1.0 / (volume / 4.0) : 0.0;
-        inverseMassMapping.set(
-          [inverseMass, inverseMass, inverseMass, inverseMass],
-          i * 4
-        );
+        const tetVertIdx = mesh.tetVolumeIds[i];
+        // Individually set inverse mass of each vertex specified by the indices
+        // provided by the tetrahedron (i.e we do not iterate set inverseMass by iterating
+        // linearly through the buffer)
+        inverseMassMapping.set([inverseMass], tetVertIdx[0]);
+        inverseMassMapping.set([inverseMass], tetVertIdx[1]);
+        inverseMassMapping.set([inverseMass], tetVertIdx[2]);
+        inverseMassMapping.set([inverseMass], tetVertIdx[3]);
       }
       this.restVolumeBuffer.unmap();
       this.inverseMassBuffer.unmap();
