@@ -100,9 +100,9 @@ export class SoftBodyMesh {
   private readOnlyBindGroup: GPUBindGroup;
 
   // Uniforms Buffer
-  private uniformsBuffer: GPUBuffer;
-  private uniformBindGroupLayout: GPUBindGroupLayout;
-  private uniformBindGroup: GPUBindGroup;
+  uniformsBuffer: GPUBuffer;
+  uniformBindGroupLayout: GPUBindGroupLayout;
+  uniformBindGroup: GPUBindGroup;
 
   //Compute pipelines
   private preSolvePipeline: GPUComputePipeline;
@@ -364,9 +364,7 @@ export class SoftBodyMesh {
       mappedAtCreation: true,
     });
     {
-      const mapping = new Uint32Array(
-        this.tetEdgeIdsBuffer.getMappedRange()
-      );
+      const mapping = new Uint32Array(this.tetEdgeIdsBuffer.getMappedRange());
       // For each edge, set its vertex ids
       for (let i = 0; i < this.numEdges; i++) {
         mapping.set(mesh.tetEdgeIds[i], i * 2);
@@ -465,18 +463,21 @@ export class SoftBodyMesh {
   }
 
   setup(device: GPUDevice, args: UniformArgs) {
-    const writableArgs = new Float32Array([
-      args.deltaTime,
-      args.edgeCompliance,
-      args.volumeCompliance,
-    ]);
-    device.queue.writeBuffer(
-      this.uniformsBuffer,
-      0,
-      writableArgs.buffer,
-      writableArgs.byteOffset,
-      writableArgs.byteLength
-    );
+    device.queue.writeBuffer(this.uniformsBuffer, 0, new Float32Array([args.deltaTime, args.edgeCompliance, args.volumeCompliance]));
+  }
+
+  private runComputePipeline = (
+    commandEncoder: GPUCommandEncoder, 
+    pipeline: GPUComputePipeline, 
+    dispatches: number
+  ) => {
+    const passEncoder = commandEncoder.beginComputePass();
+    passEncoder.setPipeline(pipeline);
+    passEncoder.setBindGroup(0, this.writableBindGroup);
+    passEncoder.setBindGroup(1, this.readOnlyBindGroup);
+    passEncoder.setBindGroup(2, this.uniformBindGroup);
+    passEncoder.dispatchWorkgroups(dispatches);
+    passEncoder.end();
   }
 
   // Run the computePipelines
@@ -489,28 +490,11 @@ export class SoftBodyMesh {
       this.numVertices / workgroupSizeLimit
     );
 
-    // Pre-solve step
-    const preSolvePassEncoder = commandEncoder.beginComputePass();
-    preSolvePassEncoder.setPipeline(this.preSolvePipeline);
-    preSolvePassEncoder.setBindGroup(1, this.readOnlyBindGroup);
-    preSolvePassEncoder.dispatchWorkgroups(preSolveDispatches);
+    // Pre solve, solve Edge, solve Volume, post solve
+    this.runComputePipeline(commandEncoder, this.preSolvePipeline, preSolveDispatches);
+    this.runComputePipeline(commandEncoder, this.solveEdgePipeline, solveEdgesDispatches);
+    this.runComputePipeline(commandEncoder, this.solveVolumePipeline, solveVolumeDispatches);
+    this.runComputePipeline(commandEncoder, this.postSolvePipeline, postSolveDispatches);
 
-    // Solve Edge step
-    const solveEdgePassEncoder = commandEncoder.beginComputePass();
-    solveEdgePassEncoder.setPipeline(this.solveEdgePipeline);
-    solveEdgePassEncoder.setBindGroup(1, this.readOnlyBindGroup);
-    solveEdgePassEncoder.dispatchWorkgroups(solveEdgesDispatches);
-
-    // Solve Volume step
-    const solveVolumePassEncoder = commandEncoder.beginComputePass();
-    solveEdgePassEncoder.setPipeline(this.solveVolumePipeline);
-    solveEdgePassEncoder.setBindGroup(1, this.readOnlyBindGroup);
-    solveEdgePassEncoder.dispatchWorkgroups(solveVolumeDispatches);
-
-    // Post Solve step
-    const postSolvePassEncoder = commandEncoder.beginComputePass();
-    postSolvePassEncoder.setPipeline(this.postSolvePipeline);
-    postSolvePassEncoder.setBindGroup(1, this.readOnlyBindGroup);
-    postSolvePassEncoder.dispatchWorkgroups(postSolveDispatches);
   }
 }

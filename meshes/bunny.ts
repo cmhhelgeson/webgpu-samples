@@ -24,7 +24,7 @@ const convertToVec3Positions = (arr: number[]): [number, number, number][] => {
     const newArr: [number, number, number][] = [];
     for (let i = 0; i < arr.length; i+= 3) {
         newArr.push([
-            arr[i] * 5, arr[i + 1] * 5, arr[i + 2] * 5
+            arr[i], arr[i + 1], arr[i + 2]
         ]);
     }
     return newArr;
@@ -32,7 +32,7 @@ const convertToVec3Positions = (arr: number[]): [number, number, number][] => {
 
 
 
-const positions = convertToVec3Positions(bunnyRawData.positions);
+const positions = convertNumberArrToVec(bunnyRawData.positions, 3) as [number, number, number][];
 const triangles = convertNumberArrToVec(bunnyRawData.indices, 3) as [number, number, number][];
 const tetEdgeIds = convertNumberArrToVec(bunnyRawData.tetEdgeIds, 2) as [number, number][];
 const tetVolumeIds = convertNumberArrToVec(bunnyRawData.tetIds, 4) as [number, number, number, number][];

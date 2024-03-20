@@ -238,8 +238,12 @@ const settings = {
   mode: 'rendering',
   numLights: 128,
   cameraX: 0,
-  cameraY: 0,
-  cameraZ: 3,
+  cameraY: -2.09,
+  cameraZ: -2.09,
+  enforceDeltaTime: false,
+  deltaTime: 0.05,
+  edgeCompliance: 100.0,
+  volumeCompliance: 0.0,
 };
 const configUniformBuffer = (() => {
   const buffer = device.createBuffer({
@@ -264,9 +268,14 @@ gui
       new Uint32Array([settings.numLights])
     );
   });
-gui.add(settings, 'cameraX', -100, 100).step(1);
-gui.add(settings, 'cameraY', -100, 100).step(1)
-gui.add(settings, 'cameraZ', -100, 100).step(1);
+gui.add(settings, 'cameraX', -5, 5).step(0.01);
+gui.add(settings, 'cameraY', -5, 5).step(0.01);
+gui.add(settings, 'cameraZ', -5, 5).step(0.01);
+const softBodyFolder = gui.addFolder('SoftBody');
+softBodyFolder.add(settings, 'enforceDeltaTime');
+softBodyFolder.add(settings, 'deltaTime', 0.01, 0.5).step(0.01);
+softBodyFolder.add(settings, 'edgeCompliance', 0.0, 200.0).step(1);
+softBodyFolder.add(settings, 'volumeCompliance', 0.0, 200.0).step(1);
 
 const modelUniformBuffer = device.createBuffer({
   size: 4 * 16 * 2, // two 4x4 matrix
@@ -435,7 +444,7 @@ function writeToModelUniformBuffer(device: GPUDevice) {
   const modelMatrix = mat4.create();
   mat4.identity(modelMatrix);
   const now = Date.now() / 1000;
-  mat4.translate(modelMatrix, [0, -45, 0], modelMatrix);
+  mat4.translate(modelMatrix, [0, 2, 0], modelMatrix);
   // Write model matrix to buffer
   const modelData = modelMatrix as Float32Array;
   device.queue.writeBuffer(
@@ -460,13 +469,23 @@ function writeToModelUniformBuffer(device: GPUDevice) {
 
 // Rotates the camera around the origin based on time.
 function getCameraViewProjMatrix() {
-  const eyePosition = vec3.create(settings.cameraX, settings.cameraY, settings.cameraZ);
-  const viewMatrix = mat4.lookAt(eyePosition, origin, upVector);
+  const eyePosition = vec3.create(
+    settings.cameraX,
+    settings.cameraY,
+    settings.cameraZ
+  );
+  const viewMatrix = mat4.translation(eyePosition);
 
   return mat4.multiply(projectionMatrix, viewMatrix) as Float32Array;
 }
 
+let lastFrameMS = Date.now();
+
 function frame() {
+  const now = Date.now();
+  const deltaTime = (now - lastFrameMS) / 1000;
+  lastFrameMS = now;
+
   writeToModelUniformBuffer(device);
   const cameraViewProj = getCameraViewProjMatrix();
   device.queue.writeBuffer(
@@ -485,8 +504,19 @@ function frame() {
     cameraInvViewProj.byteLength
   );
 
+  bunnySoftBody.setup(device, {
+    deltaTime: deltaTime,
+    edgeCompliance: settings.edgeCompliance,
+    volumeCompliance: settings.volumeCompliance,
+  });
+
+
   const commandEncoder = device.createCommandEncoder();
   {
+    bunnySoftBody.run(commandEncoder, 64);
+    // Run compute pipelines
+    //bunnySoftBody.run(commandEncoder, 64);
+
     // Write position, normal, albedo etc. data to gBuffers
     const gBufferPass = commandEncoder.beginRenderPass(
       writeGBufferPassDescriptor

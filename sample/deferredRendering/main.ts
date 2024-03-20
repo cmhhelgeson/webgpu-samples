@@ -30,6 +30,39 @@ context.configure({
   alphaMode: 'premultiplied',
 });
 
+// Create the model vertex buffer.
+const kVertexStride = 8;
+const vertexBuffer = device.createBuffer({
+  // position: vec3, normal: vec3, uv: vec2
+  size: mesh.positions.length * kVertexStride * Float32Array.BYTES_PER_ELEMENT,
+  usage: GPUBufferUsage.VERTEX,
+  mappedAtCreation: true,
+});
+{
+  const mapping = new Float32Array(vertexBuffer.getMappedRange());
+  for (let i = 0; i < mesh.positions.length; ++i) {
+    mapping.set(mesh.positions[i], kVertexStride * i);
+    mapping.set(mesh.normals[i], kVertexStride * i + 3);
+    mapping.set(mesh.uvs[i], kVertexStride * i + 6);
+  }
+  vertexBuffer.unmap();
+}
+
+// Create the model index buffer.
+const indexCount = mesh.triangles.length * 3;
+const indexBuffer = device.createBuffer({
+  size: indexCount * Uint16Array.BYTES_PER_ELEMENT,
+  usage: GPUBufferUsage.INDEX,
+  mappedAtCreation: true,
+});
+{
+  const mapping = new Uint16Array(indexBuffer.getMappedRange());
+  for (let i = 0; i < mesh.triangles.length; ++i) {
+    mapping.set(mesh.triangles[i], 3 * i);
+  }
+  indexBuffer.unmap();
+}
+
 // GBuffer texture render targets
 const gBufferTexture2DFloat16 = device.createTexture({
   size: [canvas.width, canvas.height],
@@ -41,7 +74,6 @@ const gBufferTextureAlbedo = device.createTexture({
   usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
   format: 'bgra8unorm',
 });
-console.log('beerk');
 const depthTexture = device.createTexture({
   size: [canvas.width, canvas.height],
   format: 'depth24plus',
@@ -52,6 +84,32 @@ const gBufferTextureViews = [
   gBufferTexture2DFloat16.createView(),
   gBufferTextureAlbedo.createView(),
   depthTexture.createView(),
+];
+
+const vertexBuffers: Iterable<GPUVertexBufferLayout> = [
+  {
+    arrayStride: Float32Array.BYTES_PER_ELEMENT * 8,
+    attributes: [
+      {
+        // position
+        shaderLocation: 0,
+        offset: 0,
+        format: 'float32x3',
+      },
+      {
+        // normal
+        shaderLocation: 1,
+        offset: Float32Array.BYTES_PER_ELEMENT * 3,
+        format: 'float32x3',
+      },
+      {
+        // uv
+        shaderLocation: 2,
+        offset: Float32Array.BYTES_PER_ELEMENT * 6,
+        format: 'float32x2',
+      },
+    ],
+  },
 ];
 
 const primitive: GPUPrimitiveState = {
@@ -65,7 +123,7 @@ const writeGBuffersPipeline = device.createRenderPipeline({
     module: device.createShaderModule({
       code: vertexWriteGBuffers,
     }),
-    buffers: bunnySoftBody.vertexBufferLayout,
+    buffers: vertexBuffers,
   },
   fragment: {
     module: device.createShaderModule({
@@ -231,9 +289,6 @@ const textureQuadPassDescriptor: GPURenderPassDescriptor = {
 const settings = {
   mode: 'rendering',
   numLights: 128,
-  cameraX: 0,
-  cameraY: 0,
-  cameraZ: 3,
 };
 const configUniformBuffer = (() => {
   const buffer = device.createBuffer({
@@ -258,9 +313,6 @@ gui
       new Uint32Array([settings.numLights])
     );
   });
-gui.add(settings, 'cameraX', -100, 100).step(1);
-gui.add(settings, 'cameraY', -100, 100).step(1)
-gui.add(settings, 'cameraZ', -100, 100).step(1);
 
 const modelUniformBuffer = device.createBuffer({
   size: 4 * 16 * 2, // two 4x4 matrix
@@ -416,52 +468,46 @@ const lightsBufferComputeBindGroup = device.createBindGroup({
 //--------------------
 
 // Scene matrices
-//const eyePosition = vec3.fromValues(0, 0, 3);
+const eyePosition = vec3.fromValues(0, 50, -100);
 const upVector = vec3.fromValues(0, 1, 0);
 const origin = vec3.fromValues(0, 0, 0);
 
 const projectionMatrix = mat4.perspective((2 * Math.PI) / 5, aspect, 1, 2000.0);
 
 // Move the model so it's centered.
+const modelMatrix = mat4.translation([0, -45, 0]);
 
-function writeToModelUniformBuffer(device: GPUDevice) {
-  // Rotate and translate model matrix
-  const modelMatrix = mat4.create();
-  mat4.identity(modelMatrix);
-  const now = Date.now() / 1000;
-  mat4.translate(modelMatrix, [0, -45, 0], modelMatrix);
-  // Write model matrix to buffer
-  const modelData = modelMatrix as Float32Array;
-  device.queue.writeBuffer(
-    modelUniformBuffer,
-    0,
-    modelData.buffer,
-    modelData.byteOffset,
-    modelData.byteLength
-  );
-  // Write inverse model matrix to buffer
-  const invertTransposeModelMatrix = mat4.invert(modelMatrix);
-  mat4.transpose(invertTransposeModelMatrix, invertTransposeModelMatrix);
-  const normalModelData = invertTransposeModelMatrix as Float32Array;
-  device.queue.writeBuffer(
-    modelUniformBuffer,
-    64,
-    normalModelData.buffer,
-    normalModelData.byteOffset,
-    normalModelData.byteLength
-  );
-}
+const modelData = modelMatrix as Float32Array;
+device.queue.writeBuffer(
+  modelUniformBuffer,
+  0,
+  modelData.buffer,
+  modelData.byteOffset,
+  modelData.byteLength
+);
+const invertTransposeModelMatrix = mat4.invert(modelMatrix);
+mat4.transpose(invertTransposeModelMatrix, invertTransposeModelMatrix);
+const normalModelData = invertTransposeModelMatrix as Float32Array;
+device.queue.writeBuffer(
+  modelUniformBuffer,
+  64,
+  normalModelData.buffer,
+  normalModelData.byteOffset,
+  normalModelData.byteLength
+);
 
 // Rotates the camera around the origin based on time.
 function getCameraViewProjMatrix() {
-  const eyePosition = vec3.create(settings.cameraX, settings.cameraY, settings.cameraZ);
-  const viewMatrix = mat4.lookAt(eyePosition, origin, upVector);
+  const rad = Math.PI * (Date.now() / 5000);
+  const rotation = mat4.rotateY(mat4.translation(origin), rad);
+  const rotatedEyePosition = vec3.transformMat4(eyePosition, rotation);
+
+  const viewMatrix = mat4.lookAt(rotatedEyePosition, origin, upVector);
 
   return mat4.multiply(projectionMatrix, viewMatrix) as Float32Array;
 }
 
 function frame() {
-  writeToModelUniformBuffer(device);
   const cameraViewProj = getCameraViewProjMatrix();
   device.queue.writeBuffer(
     cameraUniformBuffer,
@@ -487,9 +533,9 @@ function frame() {
     );
     gBufferPass.setPipeline(writeGBuffersPipeline);
     gBufferPass.setBindGroup(0, sceneUniformBindGroup);
-    gBufferPass.setVertexBuffer(0, bunnySoftBody.vertexBuffer);
-    gBufferPass.setIndexBuffer(bunnySoftBody.indexBuffer, 'uint16');
-    gBufferPass.drawIndexed(bunnySoftBody.indexCount);
+    gBufferPass.setVertexBuffer(0, vertexBuffer);
+    gBufferPass.setIndexBuffer(indexBuffer, 'uint16');
+    gBufferPass.drawIndexed(indexCount);
     gBufferPass.end();
   }
   {
