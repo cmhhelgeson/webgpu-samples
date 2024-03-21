@@ -34,8 +34,11 @@ fn getTetVolume(index: u32) -> f32 {
 fn solveVolume(
   @builtin(global_invocation_id) global_id : vec3u
 ) {
-    var w = 0.0;
-    var alpha = uniforms.volume_compliance / uniforms.delta_time / uniforms.delta_time;
+  if (global_id.x > uniforms.num_tets) {
+    return;
+  }
+  var w = 0.0;
+  var alpha = uniforms.volume_compliance / uniforms.delta_time / uniforms.delta_time;
     var gradients: array<vec3f, 4> = array<vec3f, 4>(
         vec3f(0.0, 0.0, 0.0),
         vec3f(0.0, 0.0, 0.0),

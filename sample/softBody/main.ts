@@ -510,12 +510,11 @@ function frame() {
     volumeCompliance: settings.volumeCompliance,
   });
 
-
   const commandEncoder = device.createCommandEncoder();
   {
-    bunnySoftBody.run(commandEncoder, 64);
-    // Run compute pipelines
     //bunnySoftBody.run(commandEncoder, 64);
+    // Run compute pipelines
+    bunnySoftBody.run(commandEncoder, 64);
 
     // Write position, normal, albedo etc. data to gBuffers
     const gBufferPass = commandEncoder.beginRenderPass(

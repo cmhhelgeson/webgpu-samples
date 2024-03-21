@@ -15,6 +15,10 @@
 fn solveEdge(
   @builtin(global_invocation_id) global_id : vec3u
 ) {
+  if (global_id.x > uniforms.num_edges) {
+    return
+  }
+
   let alpha = uniforms.edge_compliance / uniforms.delta_time / uniforms.delta_time;
   let edge = edge_ids[global_id.x];
   let w0 = inverse_masses[edge.x];

@@ -72,6 +72,7 @@ export class SoftBodyMesh {
   public velocitiesBuffer: GPUBuffer;
   // Bind Group for compute shader access to per vertex information
   private writableBindGroupLayout: GPUBindGroupLayout;
+  // @group 0
   private writableBindGroup: GPUBindGroup;
 
   // Triangle index information
@@ -97,11 +98,13 @@ export class SoftBodyMesh {
   private inverseMassBuffer: GPUBuffer;
   // read-only bind group
   private readOnlyBindGroupLayout: GPUBindGroupLayout;
+  // @group(1)
   private readOnlyBindGroup: GPUBindGroup;
 
   // Uniforms Buffer
   uniformsBuffer: GPUBuffer;
   uniformBindGroupLayout: GPUBindGroupLayout;
+  // @group(2)
   uniformBindGroup: GPUBindGroup;
 
   //Compute pipelines
@@ -151,6 +154,30 @@ export class SoftBodyMesh {
     return vec3.dot(perpVectorC, baseToTipVectorD) / 6.0;
   };
 
+  private createWriteStorageBindGroup(device: GPUDevice) {
+    this.writableBindGroupLayout = device.createBindGroupLayout({
+      label: 'SoftBody.bindGroupLayout.writable',
+      entries: [
+        // Vertices (pos, normal, uv)
+        createWritableStorageLayoutEntry(0),
+        // Prev Positions
+        createWritableStorageLayoutEntry(1),
+        // Velocities
+        createWritableStorageLayoutEntry(2),
+      ],
+    });
+
+    this.writableBindGroup = device.createBindGroup({
+      label: 'SoftBody.bindGroup.writable',
+      layout: this.writableBindGroupLayout,
+      entries: [
+        createBindGroupBufferEntry(0, this.vertexBuffer),
+        createBindGroupBufferEntry(1, this.prevPositionsBuffer),
+        createBindGroupBufferEntry(2, this.velocitiesBuffer),
+      ],
+    });
+  }
+
   private createReadOnlyStorageBindGroup(device: GPUDevice) {
     this.readOnlyBindGroupLayout = device.createBindGroupLayout({
       label: 'SoftBody.bindGroupLayout.readOnly',
@@ -181,35 +208,11 @@ export class SoftBodyMesh {
     });
   }
 
-  private createWriteStorageBindGroup(device: GPUDevice) {
-    this.writableBindGroupLayout = device.createBindGroupLayout({
-      label: 'SoftBody.bindGroupLayout.writable',
-      entries: [
-        // Vertices (pos, normal, uv)
-        createWritableStorageLayoutEntry(0),
-        // Prev Positions
-        createWritableStorageLayoutEntry(1),
-        // Velocities
-        createWritableStorageLayoutEntry(2),
-      ],
-    });
-
-    this.writableBindGroup = device.createBindGroup({
-      label: 'SoftBody.bindGroup.writable',
-      layout: this.writableBindGroupLayout,
-      entries: [
-        createBindGroupBufferEntry(0, this.vertexBuffer),
-        createBindGroupBufferEntry(1, this.prevPositionsBuffer),
-        createBindGroupBufferEntry(2, this.velocitiesBuffer),
-      ],
-    });
-  }
-
   private createUniformBindGroup(device: GPUDevice) {
-    // delta_time, edge_compliance, volume_compliance
+    // f32s delta_time, edge_compliance, volume_compliance + u32s num_verts, num_edges, num_tets
     this.uniformsBuffer = device.createBuffer({
       label: 'SoftBody.unifromsBuffer',
-      size: Float32Array.BYTES_PER_ELEMENT * 3,
+      size: Float32Array.BYTES_PER_ELEMENT * 6,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     // Bind Group Resources
@@ -253,7 +256,14 @@ export class SoftBodyMesh {
           }),
           entryPoint,
         },
-        layout: 'auto',
+        layout: device.createPipelineLayout({
+          label: `SoftBody.computePipelineLayout.${entryPoint}`,
+          bindGroupLayouts: [
+            this.writableBindGroupLayout,
+            this.readOnlyBindGroupLayout,
+            this.uniformBindGroupLayout,
+          ],
+        }),
       });
     };
     this.preSolvePipeline = createSoftBodyComputePipeline(
@@ -276,7 +286,8 @@ export class SoftBodyMesh {
 
   constructor({ device, mesh }: SoftBodyMeshConstructorArgs) {
     // WRITABLE BIND GROUP RESOURCES
-    // Create vertex buffers
+
+    // Vec3 pos, vec 3 normal, vec2 uv for 8 f32s per vertex
     const vertexStride = 8;
     this.numVertices = mesh.positions.length;
 
@@ -284,11 +295,14 @@ export class SoftBodyMesh {
     this.vertexBuffer = device.createBuffer({
       label: 'SoftBody.vertexBuffer',
       // position: vec3, normal: vec3, uv: vec2
-      size: this.numVertices * 8 * Float32Array.BYTES_PER_ELEMENT,
+      size: this.numVertices * vertexStride * Float32Array.BYTES_PER_ELEMENT,
+      // Use as both vertex buffer for renderPipeline and as storage buffer within edge/volumne constraint compute pipelines
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE,
       mappedAtCreation: true,
     });
+
     const mapping = new Float32Array(this.vertexBuffer.getMappedRange());
+    // Set vertex info from mesh
     for (let i = 0; i < mesh.positions.length; ++i) {
       mapping.set(mesh.positions[i], vertexStride * i);
       mapping.set(mesh.normals[i], vertexStride * i + 3);
@@ -296,6 +310,7 @@ export class SoftBodyMesh {
     }
     this.vertexBuffer.unmap();
 
+    // Create vertex buffer layout that conforms to data in our vertex buffer
     this.vertexBufferLayout = [
       {
         arrayStride: Float32Array.BYTES_PER_ELEMENT * 8,
@@ -321,7 +336,7 @@ export class SoftBodyMesh {
         ],
       },
     ];
-    // Create a buffer that represents the vertices positions on the last frame
+    // Create a buffer that represents the vertices three-dimensional positions on the last frame
     this.prevPositionsBuffer = device.createBuffer({
       // Prev positions represented as a vec3 but accessed as f32s for vertex allignment
       label: 'SoftBody.storageBuffer.prevPostions',
@@ -352,12 +367,20 @@ export class SoftBodyMesh {
       this.indexBuffer.unmap();
     }
 
+    // All of the buffers above are buffers that will be written to at various points within our compute shaders.
+    // For the sake of separating readable storage from writable storage, I have separated each category into its own bind group
+    this.createWriteStorageBindGroup(device);
+
+    // READABLE BIND GROUP RESOURCES
+    // Now we create buffers that hold the ids for our tetrahedrons, as well as the resting lengths, volumes, and inverse masses
+    // of the tet edges, geometries, and vertices respectively
+
     // each [number, number] in tetEdgeIds represents a single edge
     this.numEdges = mesh.tetEdgeIds.length;
 
     // Store the tetrahedron edge ids
     this.tetEdgeIdsBuffer = device.createBuffer({
-      // Vec2f. 2 ids per edge for 2 vertices it is composed of
+      // Vec2u. 2 ids per edge for 2 vertices it is composed of
       label: 'SoftBody.storageBuffer.tetEdgeIds',
       size: this.numEdges * 2 * Uint32Array.BYTES_PER_ELEMENT,
       usage: GPUBufferUsage.STORAGE,
@@ -374,7 +397,7 @@ export class SoftBodyMesh {
 
     // Store the lengths of each tetrahedron edge
     this.restEdgeLengthsBuffer = device.createBuffer({
-      // One length per edge
+      // One length per each edge
       label: 'SoftBody.storageBuffer.restEdgeLengths',
       size: this.numEdges * Float32Array.BYTES_PER_ELEMENT,
       usage: GPUBufferUsage.STORAGE,
@@ -396,12 +419,12 @@ export class SoftBodyMesh {
       this.restEdgeLengthsBuffer.unmap();
     }
 
-    // Each [num, num, num, num] in tetVolumeIds represents a signle tetrahedron volume
+    // Each [num, num, num, num] :) in tetVolumeIds represents a signle tetrahedron volume
     this.numTets = mesh.tetVolumeIds.length;
 
     // Store the tetrahedron volume ids
     this.tetVolumeIdsBuffer = device.createBuffer({
-      // Vec4: 4 vertices per tet
+      // Vec4u: 4 vertices per tet, 1 id for each
       label: 'SoftBody.storageBuffer.tetVolumeIds',
       size: Uint32Array.BYTES_PER_ELEMENT * 4 * this.numTets,
       usage: GPUBufferUsage.STORAGE,
@@ -459,16 +482,36 @@ export class SoftBodyMesh {
       this.inverseMassBuffer.unmap();
     }
 
+    // Create read-only bind group
+    this.createReadOnlyStorageBindGroup(device);
+    // Create uniforms buffer
+    this.createUniformBindGroup(device);
+    // Create compute pipelines (only run once bind group layouts are created, as it relies on the class's internal bindGroupLayouts to create the new pipelines)
     this.createSoftBodyComputePipelines(device);
   }
 
   setup(device: GPUDevice, args: UniformArgs) {
-    device.queue.writeBuffer(this.uniformsBuffer, 0, new Float32Array([args.deltaTime, args.edgeCompliance, args.volumeCompliance]));
+    device.queue.writeBuffer(
+      this.uniformsBuffer,
+      0,
+      new Float32Array([
+        args.deltaTime,
+        args.edgeCompliance,
+        args.volumeCompliance,
+      ])
+    );
+
+    // Compute shader stopgaps
+    device.queue.writeBuffer(
+      this.uniformsBuffer,
+      12,
+      new Uint32Array([this.numVertices, this.numEdges, this.numTets])
+    );
   }
 
   private runComputePipeline = (
-    commandEncoder: GPUCommandEncoder, 
-    pipeline: GPUComputePipeline, 
+    commandEncoder: GPUCommandEncoder,
+    pipeline: GPUComputePipeline,
     dispatches: number
   ) => {
     const passEncoder = commandEncoder.beginComputePass();
@@ -478,7 +521,7 @@ export class SoftBodyMesh {
     passEncoder.setBindGroup(2, this.uniformBindGroup);
     passEncoder.dispatchWorkgroups(dispatches);
     passEncoder.end();
-  }
+  };
 
   // Run the computePipelines
   run(commandEncoder: GPUCommandEncoder, workgroupSizeLimit: number) {
@@ -491,10 +534,25 @@ export class SoftBodyMesh {
     );
 
     // Pre solve, solve Edge, solve Volume, post solve
-    this.runComputePipeline(commandEncoder, this.preSolvePipeline, preSolveDispatches);
-    this.runComputePipeline(commandEncoder, this.solveEdgePipeline, solveEdgesDispatches);
-    this.runComputePipeline(commandEncoder, this.solveVolumePipeline, solveVolumeDispatches);
-    this.runComputePipeline(commandEncoder, this.postSolvePipeline, postSolveDispatches);
-
+    this.runComputePipeline(
+      commandEncoder,
+      this.preSolvePipeline,
+      preSolveDispatches
+    );
+    this.runComputePipeline(
+      commandEncoder,
+      this.solveEdgePipeline,
+      solveEdgesDispatches
+    );
+    this.runComputePipeline(
+      commandEncoder,
+      this.solveVolumePipeline,
+      solveVolumeDispatches
+    );
+    this.runComputePipeline(
+      commandEncoder,
+      this.postSolvePipeline,
+      postSolveDispatches
+    );
   }
 }

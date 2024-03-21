@@ -2,6 +2,9 @@ struct Uniforms {
   delta_time: f32,
   edge_compliance: f32,
   volume_compliance: f32,
+  num_verts: u32,
+  num_edges: u32,
+  num_tets: u32,
 }
 
 const GRAVITY = vec3f(0.0, 9.8, 0.0);

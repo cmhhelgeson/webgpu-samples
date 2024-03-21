@@ -15,6 +15,10 @@
 fn preSolve(
   @builtin(global_invocation_id) global_id : vec3u
 ) {
+  if (global_id.x > uniforms.num_verts) {
+    return;
+  }
+
   //Apply gravity to current velocity
   let current_velocity = &velocities[global_id.x];
   (*current_velocity).y += GRAVITY.y * uniforms.delta_time;
