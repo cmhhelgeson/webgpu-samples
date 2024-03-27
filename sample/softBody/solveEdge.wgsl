@@ -16,7 +16,7 @@ fn solveEdge(
   @builtin(global_invocation_id) global_id : vec3u
 ) {
   if (global_id.x > uniforms.num_edges) {
-    return
+    return;
   }
 
   let alpha = uniforms.edge_compliance / uniforms.delta_time / uniforms.delta_time;

@@ -8,7 +8,8 @@ import fragmentWriteGBuffers from './fragmentWriteGBuffers.wgsl';
 import vertexTextureQuad from './vertexTextureQuad.wgsl';
 import fragmentGBuffersDebugView from './fragmentGBuffersDebugView.wgsl';
 import fragmentDeferredRendering from './fragmentDeferredRendering.wgsl';
-import { SoftBodyMesh } from './softbody';
+import { SoftBodyMesh, DebugPropertySelect } from './softbody';
+import { extractGPUData } from './utils';
 
 const kMaxNumLights = 1024;
 const lightExtentMin = vec3.fromValues(-50, -30, -50);
@@ -34,6 +35,7 @@ context.configure({
 const bunnySoftBody = new SoftBodyMesh({
   device,
   mesh,
+  debugMode: true,
 });
 
 // GBuffer texture render targets
@@ -244,6 +246,14 @@ const settings = {
   deltaTime: 0.05,
   edgeCompliance: 100.0,
   volumeCompliance: 0.0,
+  computeStep: () => {
+    return;
+  },
+  'Log Debug': () => {
+    return;
+  },
+  'Debug Property': 'Prev Positions',
+  executeStep: false,
 };
 const configUniformBuffer = (() => {
   const buffer = device.createBuffer({
@@ -276,6 +286,9 @@ softBodyFolder.add(settings, 'enforceDeltaTime');
 softBodyFolder.add(settings, 'deltaTime', 0.01, 0.5).step(0.01);
 softBodyFolder.add(settings, 'edgeCompliance', 0.0, 200.0).step(1);
 softBodyFolder.add(settings, 'volumeCompliance', 0.0, 200.0).step(1);
+softBodyFolder.add(settings, 'computeStep').onChange(() => {
+  settings.executeStep = true;
+});
 
 const modelUniformBuffer = device.createBuffer({
   size: 4 * 16 * 2, // two 4x4 matrix
@@ -481,6 +494,42 @@ function getCameraViewProjMatrix() {
 
 let lastFrameMS = Date.now();
 
+gui.add(settings, 'Log Debug').onChange(() => {
+  switch (settings['Debug Property'] as DebugPropertySelect) {
+    case 'Prev Positions':
+    case 'Velocities': {
+      extractGPUData(
+        bunnySoftBody.debug_PrevPosition_Velocity_Buffer,
+        bunnySoftBody.debug_PrevPosition_Velocity_Buffer.size
+      ).then((data) => {
+        console.log(new Float32Array(data));
+        bunnySoftBody.debug_PrevPosition_Velocity_Buffer.unmap();
+      });
+      break;
+    }
+    case 'Tet Edge Ids': {
+      extractGPUData(
+        bunnySoftBody.tetEdgeIdsDebugBuffer,
+        bunnySoftBody.tetEdgeIdsDebugBuffer.size
+      ).then((data) => {
+        console.log(new Uint32Array(data));
+        bunnySoftBody.tetEdgeIdsDebugBuffer.unmap();
+      });
+      break;
+    }
+  }
+});
+gui.add(settings, 'Debug Property', [
+  'Positions',
+  'Prev Positions',
+  'Velocities',
+  'Tet Edge Ids',
+  'Tet Volume Ids',
+  'Rest Lengths',
+  'Rest Volume',
+  'Inverse Mass',
+] as DebugPropertySelect[]);
+
 function frame() {
   const now = Date.now();
   const deltaTime = (now - lastFrameMS) / 1000;
@@ -512,10 +561,13 @@ function frame() {
 
   const commandEncoder = device.createCommandEncoder();
   {
-    //bunnySoftBody.run(commandEncoder, 64);
-    // Run compute pipelines
-    bunnySoftBody.run(commandEncoder, 64);
-
+    // Run soft body compute pipelinesR5
+    if (settings.executeStep) {
+      bunnySoftBody.run(commandEncoder, 64);
+      console.log(settings.executeStep);
+    }
+  }
+  {
     // Write position, normal, albedo etc. data to gBuffers
     const gBufferPass = commandEncoder.beginRenderPass(
       writeGBufferPassDescriptor
@@ -566,7 +618,13 @@ function frame() {
       deferredRenderingPass.end();
     }
   }
+  bunnySoftBody.debugSoftBodyProperty(
+    commandEncoder,
+    settings['Debug Property'] as DebugPropertySelect
+  );
+
   device.queue.submit([commandEncoder.finish()]);
+  settings.executeStep = false;
 
   requestAnimationFrame(frame);
 }

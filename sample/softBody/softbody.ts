@@ -5,6 +5,16 @@ import postSolveWGSL from './postSolve.wgsl';
 import commonsWGSL from './commons.wgsl';
 import { Vec3, vec3 } from 'wgpu-matrix';
 
+export type DebugPropertySelect =
+  | 'Positions'
+  | 'Velocities'
+  | 'Prev Positions'
+  | 'Tet Edge Ids'
+  | 'Tet Volume Ids'
+  | 'Rest Volume'
+  | 'Rest Lengths'
+  | 'Inverse Mass';
+
 interface SoftBodyMeshConstructorArgs {
   device: GPUDevice;
   mesh: {
@@ -15,6 +25,7 @@ interface SoftBodyMeshConstructorArgs {
     tetEdgeIds: [number, number][];
     tetVolumeIds: [number, number, number, number][];
   };
+  debugMode: boolean;
 }
 
 interface UniformArgs {
@@ -70,6 +81,9 @@ export class SoftBodyMesh {
   public prevPositionsBuffer: GPUBuffer;
   // Vec2 velocity buffer
   public velocitiesBuffer: GPUBuffer;
+  // Debug buffer for prev_position, velocity
+  public debug_PrevPosition_Velocity_Buffer: GPUBuffer;
+
   // Bind Group for compute shader access to per vertex information
   private writableBindGroupLayout: GPUBindGroupLayout;
   // @group 0
@@ -88,10 +102,13 @@ export class SoftBodyMesh {
   // read-only storage buffers
   // Ids of vertexes that form edges within a tetrahedron
   private tetEdgeIdsBuffer: GPUBuffer;
+  public tetEdgeIdsDebugBuffer: GPUBuffer;
   // Ids of vertexes that form a tetrahedron volume
   private tetVolumeIdsBuffer: GPUBuffer;
+  private tetVolumeIdsDebugBuffer: GPUBuffer;
   // Rest length of the tetrahedron edges
   private restEdgeLengthsBuffer: GPUBuffer;
+  public resteEdgeLengthsDebugBuffer: GPUBuffer;
   // Rest Volume of the mesh's tetrahedrons
   private restVolumeBuffer: GPUBuffer;
   // Inverse Mass of each tetrahedron vertex?
@@ -114,6 +131,56 @@ export class SoftBodyMesh {
   private postSolvePipeline: GPUComputePipeline;
   // Re-calc normals pipeline?
   // private calcNormalsPipeline: GPUComputePipeline
+
+  public debugSoftBodyProperty = (
+    commandEncoder: GPUCommandEncoder,
+    debugProperty: DebugPropertySelect
+  ) => {
+    switch (debugProperty) {
+      case 'Velocities':
+        {
+          commandEncoder.copyBufferToBuffer(
+            this.velocitiesBuffer,
+            0,
+            this.debug_PrevPosition_Velocity_Buffer,
+            0,
+            this.velocitiesBuffer.size
+          );
+        }
+        break;
+      case 'Prev Positions':
+        {
+          commandEncoder.copyBufferToBuffer(
+            this.prevPositionsBuffer,
+            0,
+            this.debug_PrevPosition_Velocity_Buffer,
+            0,
+            this.prevPositionsBuffer.size
+          );
+        }
+        break;
+      case 'Tet Edge Ids':
+        {
+          commandEncoder.copyBufferToBuffer(
+            this.tetEdgeIdsBuffer,
+            0,
+            this.tetEdgeIdsDebugBuffer,
+            0,
+            this.tetEdgeIdsBuffer.size
+          );
+        }
+        break;
+      case 'Tet Volume Ids': {
+        commandEncoder.copyBufferToBuffer(
+          this.tetVolumeIdsBuffer,
+          0,
+          this.tetVolumeIdsDebugBuffer,
+          0,
+          this.tetVolumeIdsBuffer.size
+        );
+      }
+    }
+  };
 
   private getTetrahedronEdgeLength = (
     positions: [number, number, number][],
@@ -284,7 +351,7 @@ export class SoftBodyMesh {
     );
   }
 
-  constructor({ device, mesh }: SoftBodyMeshConstructorArgs) {
+  constructor({ device, mesh, debugMode }: SoftBodyMeshConstructorArgs) {
     // WRITABLE BIND GROUP RESOURCES
 
     // Vec3 pos, vec 3 normal, vec2 uv for 8 f32s per vertex
@@ -336,20 +403,31 @@ export class SoftBodyMesh {
         ],
       },
     ];
+
+    const perVertex3DBufferSize =
+      this.numVertices * Float32Array.BYTES_PER_ELEMENT * 3;
     // Create a buffer that represents the vertices three-dimensional positions on the last frame
     this.prevPositionsBuffer = device.createBuffer({
       // Prev positions represented as a vec3 but accessed as f32s for vertex allignment
       label: 'SoftBody.storageBuffer.prevPostions',
-      size: this.numVertices * Float32Array.BYTES_PER_ELEMENT * 3,
-      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
+      size: perVertex3DBufferSize,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
     });
 
     //Create a buffer that represents the 3D velocities of each vertex
     this.velocitiesBuffer = device.createBuffer({
       label: 'SoftBody.storageBuffer.velocities',
-      size: this.numVertices * Float32Array.BYTES_PER_ELEMENT * 3,
-      usage: GPUBufferUsage.STORAGE,
+      size: perVertex3DBufferSize,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
     });
+
+    if (debugMode) {
+      this.debug_PrevPosition_Velocity_Buffer = device.createBuffer({
+        label: 'SoftBody.debugBuffer.prevPos_Velocity',
+        size: perVertex3DBufferSize,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+      });
+    }
 
     // Create index buffers
     this.indexCount = mesh.triangles.length * 3;
@@ -383,7 +461,7 @@ export class SoftBodyMesh {
       // Vec2u. 2 ids per edge for 2 vertices it is composed of
       label: 'SoftBody.storageBuffer.tetEdgeIds',
       size: this.numEdges * 2 * Uint32Array.BYTES_PER_ELEMENT,
-      usage: GPUBufferUsage.STORAGE,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
       mappedAtCreation: true,
     });
     {
@@ -393,6 +471,15 @@ export class SoftBodyMesh {
         mapping.set(mesh.tetEdgeIds[i], i * 2);
       }
       this.tetEdgeIdsBuffer.unmap();
+    }
+
+    if (debugMode) {
+      this.tetEdgeIdsDebugBuffer = device.createBuffer({
+        // Vec2u. 2 ids per edge for 2 vertices it is composed of
+        label: 'SoftBody.storageBuffer.tetEdgeIds_debug',
+        size: this.numEdges * 2 * Uint32Array.BYTES_PER_ELEMENT,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+      });
     }
 
     // Store the lengths of each tetrahedron edge
@@ -419,6 +506,15 @@ export class SoftBodyMesh {
       this.restEdgeLengthsBuffer.unmap();
     }
 
+    if (debugMode) {
+      this.resteEdgeLengthsDebugBuffer = device.createBuffer({
+        // One length per each edge
+        label: 'SoftBody.storageBuffer.restEdgeLengths',
+        size: this.numEdges * Float32Array.BYTES_PER_ELEMENT,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+      });
+    }
+
     // Each [num, num, num, num] :) in tetVolumeIds represents a signle tetrahedron volume
     this.numTets = mesh.tetVolumeIds.length;
 
@@ -427,7 +523,7 @@ export class SoftBodyMesh {
       // Vec4u: 4 vertices per tet, 1 id for each
       label: 'SoftBody.storageBuffer.tetVolumeIds',
       size: Uint32Array.BYTES_PER_ELEMENT * 4 * this.numTets,
-      usage: GPUBufferUsage.STORAGE,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
       mappedAtCreation: true,
     });
     {
@@ -437,6 +533,12 @@ export class SoftBodyMesh {
       }
       this.tetVolumeIdsBuffer.unmap();
     }
+    this.tetVolumeIdsDebugBuffer = device.createBuffer({
+      // Vec4u: 4 vertices per tet, 1 id for each
+      label: 'SoftBody.storageBuffer.tetVolumeIds',
+      size: Uint32Array.BYTES_PER_ELEMENT * 4 * this.numTets,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    });
 
     // Store the tetrahedron volumes and inverseMass
     this.restVolumeBuffer = device.createBuffer({
@@ -445,19 +547,11 @@ export class SoftBodyMesh {
       usage: GPUBufferUsage.STORAGE,
       mappedAtCreation: true,
     });
-    this.inverseMassBuffer = device.createBuffer({
-      label: 'SoftBody.storageBuffer.inverseMass',
-      // 4 masses for each tet, one mass per vertex
-      size: Float32Array.BYTES_PER_ELEMENT * 4 * this.numTets,
-      usage: GPUBufferUsage.STORAGE,
-      mappedAtCreation: true,
-    });
+    const invMassArr = new Float32Array(this.numVertices);\
+    invMassArr.fill(0.0);
     {
       const restVolMapping = new Float32Array(
         this.restVolumeBuffer.getMappedRange()
-      );
-      const inverseMassMapping = new Float32Array(
-        this.inverseMassBuffer.getMappedRange()
       );
       for (let i = 0; i < this.numTets; i++) {
         // Set the mass of each tetrahedron
@@ -472,15 +566,30 @@ export class SoftBodyMesh {
         const tetVertIdx = mesh.tetVolumeIds[i];
         // Individually set inverse mass of each vertex specified by the indices
         // provided by the tetrahedron (i.e we do not iterate set inverseMass by iterating
-        // linearly through the buffer)
-        inverseMassMapping.set([inverseMass], tetVertIdx[0]);
-        inverseMassMapping.set([inverseMass], tetVertIdx[1]);
-        inverseMassMapping.set([inverseMass], tetVertIdx[2]);
-        inverseMassMapping.set([inverseMass], tetVertIdx[3]);
+        // linearly through the ]uffer)
+        invMassArr[tetVertIdx[0]] += inverseMass;
+        invMassArr[tetVertIdx[1]] += inverseMass;
+        invMassArr[tetVertIdx[2]] += inverseMass;
+        invMassArr[tetVertIdx[3]] += inverseMass;
       }
       this.restVolumeBuffer.unmap();
-      this.inverseMassBuffer.unmap();
     }
+
+    this.inverseMassBuffer = device.createBuffer({
+      label: 'SoftBody.storageBuffer.inverseMass',
+      // 4 masses for each tet, one mass per vertex
+      size: Float32Array.BYTES_PER_ELEMENT * 4 * this.numTets,
+      usage: GPUBufferUsage.STORAGE,
+      mappedAtCreation: true,
+    });
+    const inverseMassMapping = new Float32Array(
+      this.inverseMassBuffer.getMappedRange()
+    );
+
+    inverseMassMapping.set(invMassArr, 0)
+
+    this.inverseMassBuffer.unmap();
+
 
     // Create read-only bind group
     this.createReadOnlyStorageBindGroup(device);
