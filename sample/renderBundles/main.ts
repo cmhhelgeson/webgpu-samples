@@ -19,9 +19,13 @@ const device = await adapter.requestDevice();
 const settings = {
   useRenderBundles: true,
   asteroidCount: 5000,
+  useDrawIndirect: false,
 };
 const gui = new GUI();
 gui.add(settings, 'useRenderBundles');
+gui.add(settings, 'useDrawIndirect').onChange(() => {
+  updateRenderBundle();
+});
 gui.add(settings, 'asteroidCount', 1000, 10000, 1000).onChange(() => {
   // If the content of the scene changes the render bundle must be recreated.
   ensureEnoughAsteroids();
@@ -321,6 +325,26 @@ function getTransformationMatrix() {
   return modelViewProjectionMatrix as Float32Array;
 }
 
+const indirectDrawBuffer = device.createBuffer({
+  size: 20 * (asteroids.length + 1),
+  usage: GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST,
+  mappedAtCreation: true,
+});
+const indirectDrawAsteroidOffset = [];
+
+const indirectDrawMapping = new Uint32Array(
+  indirectDrawBuffer.getMappedRange()
+);
+indirectDrawMapping.set([planet.indexCount, 1, 0, 0, 0], 0);
+for (let i = 1; i <= asteroids.length; i++) {
+  console.log(i * 20);
+  const asteroidIndexCount = asteroids[i - 1].indexCount;
+  // Set by offset in elements
+  indirectDrawMapping.set([asteroidIndexCount, 5, 0, 0, 0], i * 5);
+  indirectDrawAsteroidOffset.push(i * 20);
+}
+indirectDrawBuffer.unmap();
+
 // Render bundles function as partial, limited render passes, so we can use the
 // same code both to render the scene normally and to build the render bundle.
 function renderScene(
@@ -336,14 +360,28 @@ function renderScene(
   // scene, which helps demonstrate the potential time savings a render bundle
   // can provide.)
   let count = 0;
-  for (const renderable of renderables) {
-    passEncoder.setBindGroup(1, renderable.bindGroup);
-    passEncoder.setVertexBuffer(0, renderable.vertices);
-    passEncoder.setIndexBuffer(renderable.indices, 'uint16');
-    passEncoder.drawIndexed(renderable.indexCount);
-
-    if (++count > settings.asteroidCount) {
-      break;
+  if (!settings.useDrawIndirect) {
+    for (const renderable of renderables) {
+      passEncoder.setBindGroup(1, renderable.bindGroup);
+      passEncoder.setVertexBuffer(0, renderable.vertices);
+      passEncoder.setIndexBuffer(renderable.indices, 'uint16');
+      passEncoder.drawIndexed(renderable.indexCount);
+      if (++count > settings.asteroidCount) {
+        break;
+      }
+    }
+  } else {
+    for (const renderable of renderables) {
+      passEncoder.setBindGroup(1, renderable.bindGroup);
+      passEncoder.setVertexBuffer(0, renderable.vertices);
+      passEncoder.setIndexBuffer(renderable.indices, 'uint16');
+      passEncoder.drawIndexedIndirect(
+        indirectDrawBuffer,
+        indirectDrawAsteroidOffset[count % asteroids.length]
+      );
+      if (++count > settings.asteroidCount) {
+        break;
+      }
     }
   }
 }
