@@ -73,6 +73,7 @@ fn solveVolume(
     for (var i = 0; i < 4; i++) {
       // Get the
       let vertex_id = tet_volume_ids[global_id.x][i];
-      setVertexPosition(vertex_id, gradients[i] + s * inverse_masses[vertex_id]);
+      let new_vertex_position = getVertexPosition(vertex_id) + gradients * (s * inverse_masses[vertex_id]);
+      setVertexPosition(vertex_id, new_vertex_position);
     }
 }

@@ -40,8 +40,10 @@ fn solveEdge(
   let restLen = edge_lengths[global_id.x];
   let C = len - restLen;
   let s = -C / (w + alpha);
-  setVertexPosition(edge.x, gradient + s * w0);
-  setVertexPosition(edge.y, gradient + -s * w1);
+  let new_pos_0 = getVertexPosition(edge.x) + gradient * (s * w0);
+  let new_pos_1 = getVertexPosition(edge.y) + gradient * (s * w1)
+  setVertexPosition(edge.x, new_pos_0);
+  setVertexPosition(edge.y, new_pos_1);
 
 
 }
