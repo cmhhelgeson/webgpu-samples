@@ -44,6 +44,11 @@ const settings = {
   showRed: false,
   showGreen: false,
   showBlue: false,
+  // Offset mask in x direction
+  offsetX: 0.0,
+  // Offset mask in y direction
+  offsetY: 0.0,
+  scaleRadius: 2.0,
 };
 
 const gui = new GUI();
@@ -62,12 +67,55 @@ const depthTexture = device.createTexture({
   usage: GPUTextureUsage.RENDER_ATTACHMENT,
 });
 
-/*const createStencilMaskPipeline = (sdfCode: string, invertMask: boolean, showRed: boolean, showGreen: boolean, showBlue: boolean) => {
+/*const createStencilMaskPipeline = (
+  sdfCode: string,
+  invertMask: boolean,
+  showRed: boolean,
+  showGreen: boolean,
+  showBlue: boolean
+) => {
   return device.create
 } */
 
+const maskUniformBuffer = device.createBuffer({
+  label: 'StencilMask.uniformBuffer',
+  // offsetX, offsetY, radius
+  size: Float32Array.BYTES_PER_ELEMENT * 3,
+  usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.UNIFORM,
+});
+
+const maskUniformBGLayout = device.createBindGroupLayout({
+  label: 'StencilMask.bindGroupLayout',
+  entries: [
+    {
+      binding: 0,
+      buffer: {
+        type: 'uniform',
+      },
+      visibility: GPUShaderStage.VERTEX,
+    },
+  ],
+});
+
+const maskUniformBindGroup = device.createBindGroup({
+  label: 'StencilMask.bindGroup',
+  layout: maskUniformBGLayout,
+  entries: [
+    {
+      binding: 0,
+      resource: {
+        buffer: maskUniformBuffer,
+      },
+    },
+  ],
+});
+
 // Create our mask shader, which will only write to the stencil buffer.
 const stencilMaskPipeline = device.createRenderPipeline({
+  layout: device.createPipelineLayout({
+    label: 'StencilMask.pipelineLayout',
+    bindGroupLayouts: [maskUniformBGLayout],
+  }),
   label: 'StencilMask.renderPipeline',
   vertex: {
     module: device.createShaderModule({
@@ -110,7 +158,6 @@ const stencilMaskPipeline = device.createRenderPipeline({
     },
     stencilWriteMask: 0xff,
   },
-  layout: 'auto',
 });
 
 const stencilMaskPassDescriptor: GPURenderPassDescriptor = {
@@ -320,7 +367,9 @@ const renderPassDescriptor: GPURenderPassDescriptor = {
 };
 
 function frame() {
-  // Update the matrix data.
+  // Update mask position and size
+  device.queue.writeBuffer(maskUniformBuffer, 0, new Float32Array([0.5, 0.5, 3.0]);
+  // Update the cube matrix data.
   updateTransformationMatrix();
   device.queue.writeBuffer(
     uniformBuffer,
@@ -330,19 +379,21 @@ function frame() {
     mvpMatricesData.byteLength
   );
 
+  // Does nothing but make the compiler happy
   stencilMaskPassDescriptor.colorAttachments[0].view = context
     .getCurrentTexture()
     .createView();
+  // Actually used as render target here
   renderPassDescriptor.colorAttachments[0].view = context
     .getCurrentTexture()
     .createView();
 
   const commandEncoder = device.createCommandEncoder();
-
   const stencilPassEncoder = commandEncoder.beginRenderPass(
     stencilMaskPassDescriptor
   );
   stencilPassEncoder.setPipeline(stencilMaskPipeline);
+  stencilPassEncoder.setBindGroup(0, maskUniformBindGroup);
   // Value that will be placed at pixel in stencil buffer when comparison succeeds
   stencilPassEncoder.setStencilReference(1);
   stencilPassEncoder.draw(6, 1);
