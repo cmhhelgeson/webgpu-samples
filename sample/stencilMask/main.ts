@@ -8,14 +8,9 @@ import {
   cubeVertexCount,
 } from '../../meshes/cube';
 
-interface StencilMaskPipelineSetting {
-  maskPipeline: GPURenderPipeline;
-  renderPipeline: GPURenderPipeline;
-}
-
 // Stencil Mask Shader
 import fullscreenQuadWGSL from './fullscreenQuad.vert.wgsl';
-import circleSDFWGSL from './circleSDF.frag.wgsl';
+import sdfWGSL from './sdf.frag.wgsl';
 
 // Cube render shader
 import instancedVertWGSL from './instanced.vert.wgsl';
@@ -39,11 +34,14 @@ context.configure({
   alphaMode: 'premultiplied',
 });
 
+enum SDFEnum {
+  circle,
+  triangle,
+}
+
 const settings = {
   sdf: 'circle',
-  showRed: false,
-  showGreen: false,
-  showBlue: false,
+  invertMask: false,
   // Offset mask in x direction
   offsetX: 0.0,
   // Offset mask in y direction
@@ -51,11 +49,28 @@ const settings = {
   scaleRadius: 2.0,
 };
 
+// Add pinch to scale mask functionality
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const scaleFactor = 0.1;
+  if (e.deltaY < 0) {
+    settings.scaleRadius += scaleFactor;
+  } else {
+    settings.scaleRadius -= scaleFactor;
+  }
+  settings.scaleRadius = Math.max(1.5, Math.min(10.0, settings.scaleRadius));
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  const halfCanvasWidth = canvas.clientWidth / 2;
+  const halfCanvasHeight = canvas.clientHeight / 2;
+  settings.offsetX = (e.clientX - halfCanvasWidth) / halfCanvasWidth;
+  settings.offsetY = (e.clientY - halfCanvasHeight) / halfCanvasHeight;
+});
+
 const gui = new GUI();
-gui.add(settings, 'sdf', ['circle']);
-gui.add(settings, 'showRed');
-gui.add(settings, 'showGreen');
-gui.add(settings, 'showBlue');
+gui.add(settings, 'sdf', ['circle', 'triangle']);
+gui.add(settings, 'invertMask');
 
 // A good portion of this code is shared with the 'Instanced Cube' sample, but
 // pay attention to the different ways in which pipelines and renderDescriptors
@@ -67,20 +82,10 @@ const depthTexture = device.createTexture({
   usage: GPUTextureUsage.RENDER_ATTACHMENT,
 });
 
-/*const createStencilMaskPipeline = (
-  sdfCode: string,
-  invertMask: boolean,
-  showRed: boolean,
-  showGreen: boolean,
-  showBlue: boolean
-) => {
-  return device.create
-} */
-
 const maskUniformBuffer = device.createBuffer({
   label: 'StencilMask.uniformBuffer',
-  // offsetX, offsetY, radius
-  size: Float32Array.BYTES_PER_ELEMENT * 3,
+  // offsetX, offsetY, radius, SDF Enum
+  size: Float32Array.BYTES_PER_ELEMENT * 4,
   usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.UNIFORM,
 });
 
@@ -92,7 +97,7 @@ const maskUniformBGLayout = device.createBindGroupLayout({
       buffer: {
         type: 'uniform',
       },
-      visibility: GPUShaderStage.VERTEX,
+      visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
     },
   ],
 });
@@ -126,7 +131,7 @@ const stencilMaskPipeline = device.createRenderPipeline({
   fragment: {
     module: device.createShaderModule({
       label: 'StencilMask.fragmentShader',
-      code: circleSDFWGSL,
+      code: sdfWGSL,
     }),
     targets: [
       {
@@ -195,70 +200,73 @@ const verticesBuffer = device.createBuffer({
 new Float32Array(verticesBuffer.getMappedRange()).set(cubeVertexArray);
 verticesBuffer.unmap();
 
-const pipeline = device.createRenderPipeline({
-  layout: 'auto',
-  vertex: {
-    module: device.createShaderModule({
-      code: instancedVertWGSL,
-    }),
-    buffers: [
-      {
-        arrayStride: cubeVertexSize,
-        attributes: [
-          {
-            // position
-            shaderLocation: 0,
-            offset: cubePositionOffset,
-            format: 'float32x4',
-          },
-          {
-            // uv
-            shaderLocation: 1,
-            offset: cubeUVOffset,
-            format: 'float32x2',
-          },
-        ],
-      },
-    ],
-  },
-  fragment: {
-    module: device.createShaderModule({
-      code: vertexPositionColorWGSL,
-    }),
-    targets: [
-      {
-        format: presentationFormat,
-      },
-    ],
-  },
-  primitive: {
-    topology: 'triangle-list',
-
-    // Backface culling since the cube is solid piece of geometry.
-    // Faces pointing away from the camera will be occluded by faces
-    // pointing toward the camera.
-    cullMode: 'back',
-  },
-
-  // Enable depth testing so that the fragment closest to the camera
-  // is rendered in front.
-  depthStencil: {
-    depthWriteEnabled: true,
-    depthCompare: 'less',
-    format: 'depth24plus-stencil8',
-    stencilFront: {
-      compare: 'not-equal',
-      passOp: 'keep',
-      failOp: 'zero',
+const createRenderPipeline = (invertMask: boolean) => {
+  return device.createRenderPipeline({
+    layout: 'auto',
+    vertex: {
+      module: device.createShaderModule({
+        code: instancedVertWGSL,
+      }),
+      buffers: [
+        {
+          arrayStride: cubeVertexSize,
+          attributes: [
+            {
+              // position
+              shaderLocation: 0,
+              offset: cubePositionOffset,
+              format: 'float32x4',
+            },
+            {
+              // uv
+              shaderLocation: 1,
+              offset: cubeUVOffset,
+              format: 'float32x2',
+            },
+          ],
+        },
+      ],
     },
-    stencilBack: {
-      compare: 'not-equal',
-      passOp: 'keep',
-      failOp: 'zero',
+    fragment: {
+      module: device.createShaderModule({
+        code: vertexPositionColorWGSL,
+      }),
+      targets: [
+        {
+          format: presentationFormat,
+        },
+      ],
     },
-    stencilReadMask: 0xff,
-  },
-});
+    primitive: {
+      topology: 'triangle-list',
+      // Backface culling since the cube is solid piece of geometry.
+      // Faces pointing away from the camera will be occluded by faces
+      // pointing toward the camera.
+      cullMode: 'back',
+    },
+    // Enable depth testing so that the fragment closest to the camera
+    // is rendered in front.
+    depthStencil: {
+      depthWriteEnabled: true,
+      depthCompare: 'less',
+      format: 'depth24plus-stencil8',
+      stencilFront: {
+        compare: invertMask ? 'not-equal' : 'equal',
+        passOp: 'keep',
+        failOp: 'zero',
+      },
+      stencilBack: {
+        compare: invertMask ? 'not-equal' : 'equal',
+        passOp: 'keep',
+        failOp: 'zero',
+      },
+      stencilReadMask: 0xff,
+    },
+  });
+};
+
+const maskPipeline = createRenderPipeline(false);
+const invertMaskPipeline = createRenderPipeline(true);
 
 const xCount = 4;
 const yCount = 4;
@@ -275,7 +283,7 @@ const uniformBuffer = device.createBuffer({
 });
 
 const uniformBindGroup = device.createBindGroup({
-  layout: pipeline.getBindGroupLayout(0),
+  layout: maskPipeline.getBindGroupLayout(0),
   entries: [
     {
       binding: 0,
@@ -368,7 +376,22 @@ const renderPassDescriptor: GPURenderPassDescriptor = {
 
 function frame() {
   // Update mask position and size
-  device.queue.writeBuffer(maskUniformBuffer, 0, new Float32Array([0.5, 0.5, 3.0]);
+  device.queue.writeBuffer(
+    maskUniformBuffer,
+    0,
+    new Float32Array([
+      settings.offsetX,
+      -settings.offsetY,
+      settings.scaleRadius,
+    ])
+  );
+  // Update mask shape
+  console.log(SDFEnum[settings.sdf]);
+  device.queue.writeBuffer(
+    maskUniformBuffer,
+    12,
+    new Uint32Array([SDFEnum[settings.sdf]])
+  );
   // Update the cube matrix data.
   updateTransformationMatrix();
   device.queue.writeBuffer(
@@ -401,7 +424,11 @@ function frame() {
 
   // Cube pass
   const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
-  passEncoder.setPipeline(pipeline);
+  if (settings.invertMask) {
+    passEncoder.setPipeline(invertMaskPipeline);
+  } else {
+    passEncoder.setPipeline(maskPipeline);
+  }
   passEncoder.setBindGroup(0, uniformBindGroup);
   passEncoder.setVertexBuffer(0, verticesBuffer);
   // Keep stencil buffer value if cube intersects with areas where stencil buffer equals 1.

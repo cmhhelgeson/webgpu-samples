@@ -8,7 +8,7 @@ export default {
     { path: 'main.ts' },
     // Stencil Mask shaders
     { path: 'fullscreenQuad.vert.wgsl' },
-    { path: 'circleSDF.frag.wgsl' },
+    { path: 'sdf.frag.wgsl' },
     // Instanced Cube verts
     { path: 'instanced.vert.wgsl' },
     { path: '../../shaders/vertexPositionColor.frag.wgsl' },
