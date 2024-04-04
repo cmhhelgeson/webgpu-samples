@@ -9,7 +9,8 @@ import {
 } from '../../meshes/cube';
 
 import instancedVertWGSL from './instanced.vert.wgsl';
-import vertexPositionColorWGSL from '../../shaders/vertexPositionColor.frag.wgsl';
+import meshWGSL from './mesh.frag..wgsl';
+//import { createSphereRenderable } from './utils';
 
 const canvas = document.querySelector('canvas') as HTMLCanvasElement;
 const adapter = await navigator.gpu.requestAdapter();
@@ -26,6 +27,78 @@ context.configure({
   device,
   format: presentationFormat,
   alphaMode: 'premultiplied',
+});
+
+//const sphere = createSphereRenderable(device, 0.025);
+
+const buffInfo = {
+  size: Float32Array.BYTES_PER_ELEMENT * numSpheres,
+  usage: GPUBufferUsage.STORAGE,
+};
+
+// Position elements
+const posXBuffer = device.createBuffer({
+  label: 'posXBuffer',
+  ...buffInfo,
+});
+const posYBuffer = device.createBuffer({
+  label: 'posYBuffer',
+  ...buffInfo,
+});
+const posZBuffer = device.createBuffer({
+  label: 'posZBuffer',
+  ...buffInfo,
+});
+const velXBuffer = device.createBuffer({
+  label: 'velXBuffer',
+  ...buffInfo,
+});
+const velYBuffer = device.createBuffer({
+  label: 'velYBuffer',
+  ...buffInfo,
+});
+const velZBuffer = device.createBuffer({
+  label: 'velZBuffer',
+  ...buffInfo,
+});
+
+const storageBuffers = [
+  posXBuffer,
+  posYBuffer,
+  posZBuffer,
+  velXBuffer,
+  velYBuffer,
+  velZBuffer,
+];
+
+const storageBGLEntries: GPUBindGroupLayoutEntry[] = [];
+const storageBGEntries: GPUBindGroupEntry[] = [];
+
+for (let i = 0; i < 6; i++) {
+  storageBGLEntries.push({
+    binding: i,
+    buffer: {
+      type: 'storage',
+    },
+    visibility: GPUShaderStage.VERTEX,
+  });
+  storageBGEntries.push({
+    binding: i,
+    resource: {
+      buffer: storageBuffers[i],
+    },
+  });
+}
+
+const storageBGLayout = device.createBindGroupLayout({
+  label: 'StorageBuffers.bindGroupLayout',
+  entries: storageBGLEntries,
+});
+
+const storageBindGroup = device.createBindGroup({
+  layout: storageBGLayout,
+  label: 'StorageBuffers.bindGroup',
+  entries: storageBGEntries,
 });
 
 // Create a vertex buffer from the cube data.
@@ -65,7 +138,7 @@ const pipeline = device.createRenderPipeline({
   },
   fragment: {
     module: device.createShaderModule({
-      code: vertexPositionColorWGSL,
+      code: meshWGSL,
     }),
     targets: [
       {
@@ -219,6 +292,7 @@ function frame() {
   const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
   passEncoder.setPipeline(pipeline);
   passEncoder.setBindGroup(0, uniformBindGroup);
+  // passEncoder.setBindGroup(1, storageBindGroup)
   passEncoder.setVertexBuffer(0, verticesBuffer);
   passEncoder.draw(cubeVertexCount, numInstances, 0, 0);
   passEncoder.end();
