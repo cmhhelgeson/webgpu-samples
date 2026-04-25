@@ -47,6 +47,7 @@ import volumeRenderingTexture3D from '../sample/volumeRenderingTexture3D/meta';
 import wireframe from '../sample/wireframe/meta';
 import worker from '../sample/worker/meta';
 import workloadSimulator from '../sample/workloadSimulator/meta';
+import prefixSum from '../sample/prefixSum/meta';
 
 export type SourceInfo = {
   path: string;

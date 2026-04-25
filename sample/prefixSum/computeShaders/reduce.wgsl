@@ -7,15 +7,18 @@ enable subgroups;
 var<private> instanceIndex : u32;
 
 // locals
+// NOTE: CONSTANT DEPENDENT ON WORKGROUP SIZE
+// NEED TO ACCOUNT FOR VARYING WORKGROUP SIZES
+// CURRENT VERSION ASSUMES WORKGROUP_SIZE_X = 256
 var<workgroup> WorkgroupArray_898: array< u32, 64 >;
 
-@binding( 0 ) @group( 0 )
+@group( 0 ) @binding( 0 )
 var<storage, read_write> Prefix_Sum_Input_Vec_0 : Vec4ArrayStruct;
 
-@binding( 1 ) @group( 0 )
+@group( 0 ) @binding(1)
 var<storage, read_write> Prefix_Sum_Reduction_0 : U32ArrayStruct;
 
-@group(0) @binding(2) var<uniform> params: PrefixSumParams;
+@group(1) @binding(0) var<uniform> params: PrefixSumParams;
 
 @compute @workgroup_size( 256, 1, 1 )
 fn reduce(

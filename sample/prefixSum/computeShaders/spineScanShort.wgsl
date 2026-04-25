@@ -6,7 +6,8 @@ var<private> instanceIndex : u32;
 struct Prefix_Sum_Reduction_0Struct {
 	value : array< u32 >
 };
-@binding( 0 ) @group( 0 )
+
+@group( 0 ) @binding( 1 )
 var<storage, read_write> Prefix_Sum_Reduction_0 : Prefix_Sum_Reduction_0Struct;
 
 @compute @workgroup_size( 256, 1, 1 )

@@ -4,10 +4,10 @@ var<private> instanceIndex : u32;
 
 var<workgroup> WorkgroupArray_898: array< u32, 64 >;
 
-@binding( 0 ) @group( 0 )
+@group( 0 ) @binding( 1 )
 var<storage, read_write> Prefix_Sum_Reduction_0 : U32ArrayStruct;
 
-@group(0) @binding(1) var<uniform> params: PrefixSumParams;
+@group(1) @binding(0) var<uniform> params: PrefixSumParams;
 
 @compute @workgroup_size( 256, 1, 1 )
 fn spineScanLong(

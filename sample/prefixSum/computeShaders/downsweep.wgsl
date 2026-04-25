@@ -1,31 +1,27 @@
 enable subgroups;
 
-// Number of u32 elements to offset the output by.
-// Default of 2 leaves prefixBuffer[0] and [1] as 0 so that:
-//   - sort.wgsl can atomicAdd at (cellHash + 1), treating it as an exclusive prefix sum
-//   - sim.wgsl can read at cellHash (no offset) for particles-before
-// Set to 0 to get a standard in-place prefix sum with no application-level offset.
-override OUTPUT_INDEX_OFFSET: u32 = 2u;
+override OUTPUT_INDEX_OFFSET: u32 = 0u;
 
 var<private> instanceIndex : u32;
 
 var<workgroup> WorkgroupArray_898: array< u32, 64 >;
 
-@binding( 0 ) @group( 0 )
+@group( 0 ) @binding(0)
 var<storage, read_write> Prefix_Sum_Input_Vec_0 : Vec4ArrayStruct;
 
-
-@binding( 1 ) @group( 0 )
+@group( 0 ) @binding(1)
 var<storage, read_write> Prefix_Sum_Reduction_0 : U32ArrayStruct;
 
 // Original vec4 output binding (standard prefix sum, no offset):
-// @binding( 2 ) @group( 0 )
+// @group(0) @binding( 2 )
 // var<storage, read_write> Prefix_Sum_Output_Vec_0 : Vec4ArrayStruct;
-
-@binding( 2 ) @group( 0 )
+@group( 0 ) @binding(2)
 var<storage, read_write> prefix_sum_output : U32ArrayStruct;
 
-@group(0) @binding(3) var<uniform> params: PrefixSumParams;
+
+// Uniforms in seperate bind group since they get changed less often
+
+@group(1) @binding(0) var<uniform> params: PrefixSumParams;
 
 @compute @workgroup_size( 256, 1, 1 )
 fn downSweep(

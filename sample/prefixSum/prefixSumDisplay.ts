@@ -1,18 +1,9 @@
-import {
-  BindGroupCluster,
-  Base2DRendererClass,
-  createBindGroupCluster,
-} from './utils';
+import { BindGroupCluster, Base2DRendererClass } from './utils';
 
-import bitonicDisplay from './bitonicDisplay.frag.wgsl';
+import prefixSumDisplayWGSL from './prefixSumDisplay.frag.wgsl';
 
-interface BitonicDisplayRenderArgs {
-  highlight: number;
-}
-
-export default class BitonicDisplayRenderer extends Base2DRendererClass {
+export default class PrefixSumDisplayRenderer extends Base2DRendererClass {
   switchBindGroup: (name: string) => void;
-  setArguments: (args: BitonicDisplayRenderArgs) => void;
   computeBGDescript: BindGroupCluster;
 
   constructor(
@@ -26,42 +17,16 @@ export default class BitonicDisplayRenderer extends Base2DRendererClass {
     this.renderPassDescriptor = renderPassDescriptor;
     this.computeBGDescript = computeBGDescript;
 
-    const uniformBuffer = device.createBuffer({
-      size: Uint32Array.BYTES_PER_ELEMENT,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-
-    const bgCluster = createBindGroupCluster(
-      [0],
-      [GPUShaderStage.FRAGMENT],
-      ['buffer'],
-      [{ type: 'uniform' }],
-      [[{ buffer: uniformBuffer }]],
-      label,
-      device
-    );
-
-    this.currentBindGroup = bgCluster.bindGroups[0];
-
     this.pipeline = super.create2DRenderPipeline(
       device,
       label,
-      [this.computeBGDescript.bindGroupLayout, bgCluster.bindGroupLayout],
-      bitonicDisplay,
+      [this.computeBGDescript.bindGroupLayout],
+      prefixSumDisplayWGSL,
       presentationFormat
     );
-
-    this.setArguments = (args: BitonicDisplayRenderArgs) => {
-      device.queue.writeBuffer(
-        uniformBuffer,
-        0,
-        new Uint32Array([args.highlight])
-      );
-    };
   }
 
-  startRun(commandEncoder: GPUCommandEncoder, args: BitonicDisplayRenderArgs) {
-    this.setArguments(args);
+  startRun(commandEncoder: GPUCommandEncoder) {
     super.executeRun(commandEncoder, this.renderPassDescriptor, this.pipeline, [
       this.computeBGDescript.bindGroups[0],
       this.currentBindGroup,
