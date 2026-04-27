@@ -4,13 +4,38 @@ import spineScanShortWGSL from './computeShaders/spineScanShort.wgsl';
 import spineScanLongWGSL from './computeShaders/spineScanLong.wgsl';
 import downSweepWGSL from './computeShaders/downsweep.wgsl';
 
-const divRoundUp = (size, part_size) => {
+type PrefixSumElementType = 'float' | 'int' | 'uint';
+type PrefixSumVecType = 'vec4' | 'ivec4' | 'uvec4';
+type SupportedTypedArray = Float32Array | Int32Array | Uint32Array;
+type PrefixSumPipelineName =
+  | 'reduce'
+  | 'spineScanShort'
+  | 'spineScanLong'
+  | 'downSweep';
+
+interface PrefixSumOptions {
+  workPerInvocation?: number;
+  workgroupSize?: number;
+}
+
+const makeTypedArray = (
+  source: SupportedTypedArray,
+  buffer: ArrayBuffer
+): SupportedTypedArray => {
+  if (source instanceof Float32Array) return new Float32Array(buffer);
+  if (source instanceof Int32Array) return new Int32Array(buffer);
+  return new Uint32Array(buffer);
+};
+
+const divRoundUp = (size: number, part_size: number): number => {
   console.log(Math.floor((size + part_size - 1) / part_size));
 
   return Math.floor((size + part_size - 1) / part_size);
 };
 
-const getTypeFromTypedArray = (typedArray) => {
+const getTypeFromTypedArray = (
+  typedArray: SupportedTypedArray
+): PrefixSumElementType => {
   switch (typedArray.constructor.name) {
     case 'Float32Array': {
       return 'float';
@@ -25,7 +50,9 @@ const getTypeFromTypedArray = (typedArray) => {
     }
 
     default: {
-      return typedArray.constructor.name.substring(0, -6).toLowerCase();
+      return typedArray.constructor.name
+        .substring(0, -6)
+        .toLowerCase() as PrefixSumElementType;
     }
   }
 };
@@ -72,8 +99,8 @@ const getTypeFromTypedArray = (typedArray) => {
  */
 export class PrefixSum {
   device: GPUDevice;
-  type: string;
-  vecType: string;
+  type: PrefixSumElementType;
+  vecType: PrefixSumVecType;
   count: number;
   vecCount: number;
   unvectorizedWorkPerInvocation: number;
@@ -82,8 +109,8 @@ export class PrefixSum {
   partitionSize: number;
   numWorkgroups: number;
   dispatchSize: number;
-  pipelines: Record<string, GPUComputePipeline>;
-  inputArrayBuffer: Float32Array | Uint32Array;
+  pipelines: Record<PrefixSumPipelineName, GPUComputePipeline>;
+  inputArrayBuffer: SupportedTypedArray;
   workPerInvocation: number;
 
   // Internal: one u32 partial-reduction result per workgroup
@@ -110,8 +137,8 @@ export class PrefixSum {
     device: GPUDevice,
     inputVecBuffer: GPUBuffer,
     outputBuffer: GPUBuffer,
-    inputArray: Float32Array | Uint32Array,
-    options = {}
+    inputArray: SupportedTypedArray,
+    options: PrefixSumOptions = {}
   ) {
     this.device = device;
     /**
@@ -139,9 +166,9 @@ export class PrefixSum {
     // Allign size of buffer to vec4
     if (inputArray.length % 4 !== 0) {
       const missingElements = 4 - (inputArray.length % 4);
-      const bytesToAdd =
-        missingElements * inputArray.constructor.BYTES_PER_ELEMENT;
-      this.inputArrayBuffer = new inputArray.constructor(
+      const bytesToAdd = missingElements * inputArray.BYTES_PER_ELEMENT;
+      this.inputArrayBuffer = makeTypedArray(
+        inputArray,
         new ArrayBuffer(inputArray.byteLength + bytesToAdd)
       );
       this.inputArrayBuffer.set([
@@ -149,7 +176,8 @@ export class PrefixSum {
         ...Array(missingElements).fill(0),
       ]);
     } else {
-      this.inputArrayBuffer = new inputArray.constructor(
+      this.inputArrayBuffer = makeTypedArray(
+        inputArray,
         new ArrayBuffer(inputArray.byteLength)
       );
       this.inputArrayBuffer.set(inputArray);
@@ -288,7 +316,7 @@ export class PrefixSum {
       ],
     });
 
-    this.pipelines = {};
+    this.pipelines = {} as Record<PrefixSumPipelineName, GPUComputePipeline>;
 
     // spineScanShort only uses @group(0); all others also use @group(1) for params
     const prefixSumPipelinesManifest = [
