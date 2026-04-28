@@ -1,8 +1,8 @@
 import prefixSumCommonsWGSL from './computeShaders/commons.wgsl';
-import reduceWGSL from './computeShaders/reduce.wgsl';
-import spineScanShortWGSL from './computeShaders/spineScanShort.wgsl';
-import spineScanLongWGSL from './computeShaders/spineScanLong.wgsl';
-import downSweepWGSL from './computeShaders/downsweep.wgsl';
+import { ReduceCompute } from './computeShaders/reduce';
+import { SpineScanShortCompute } from './computeShaders/spineScanShort';
+import { SpineScanLongCompute } from './computeShaders/spineScanLong';
+import { DownSweepCompute } from './computeShaders/downsweep';
 
 type PrefixSumElementType = 'float' | 'int' | 'uint';
 type PrefixSumVecType = 'vec4' | 'ivec4' | 'uvec4';
@@ -135,6 +135,7 @@ export class PrefixSum {
    */
   constructor(
     device: GPUDevice,
+    linearIndexingAvailable: boolean,
     inputVecBuffer: GPUBuffer,
     outputBuffer: GPUBuffer,
     inputArray: SupportedTypedArray,
@@ -322,22 +323,22 @@ export class PrefixSum {
     const prefixSumPipelinesManifest = [
       {
         name: 'reduce',
-        code: reduceWGSL,
+        code: ReduceCompute(this.workgroupSize),
         layouts: [this.dataBindGroupLayout, this.paramsBindGroupLayout],
       },
       {
         name: 'spineScanShort',
-        code: spineScanShortWGSL,
+        code: SpineScanShortCompute(this.workgroupSize),
         layouts: [this.dataBindGroupLayout],
       },
       {
         name: 'spineScanLong',
-        code: spineScanLongWGSL,
+        code: SpineScanLongCompute(this.workgroupSize),
         layouts: [this.dataBindGroupLayout, this.paramsBindGroupLayout],
       },
       {
         name: 'downSweep',
-        code: downSweepWGSL,
+        code: DownSweepCompute(this.workgroupSize),
         layouts: [this.dataBindGroupLayout, this.paramsBindGroupLayout],
         computeConstants: {},
       },

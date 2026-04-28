@@ -1,4 +1,5 @@
 import { GUI } from 'dat.gui';
+import { PrefixSum } from './PrefixSum';
 import PrefixSumDisplayRenderer from './prefixSumDisplay';
 import {
   quitIfAdapterNotAvailable,
@@ -6,53 +7,39 @@ import {
   quitIfWebGPUNotAvailableOrMissingFeatures,
 } from '../util';
 
-// Type of step that will be executed in our shader
-enum StepEnum {
-  RESET,
-  PREFIX_SUM,
-}
-
 type StepType =
   // RESET: Reset data buffer
   | 'RESET'
   // PREFIX SUM: Execute prefix sum
   | 'PREFIX_SUM';
 
-interface ConfigInfo {
-  // Number of sorts executed under a given elements + size limit config
-  numPrefixSums: number;
-  // Total collective time taken to execute each complete sort under this config
-  averageTime: number;
-}
-
 // Gui settings object
-interface SettingsInterface extends ConfigInfo {
+interface SettingsInterface {
   'Total Elements': number;
   'Grid Width': number;
   'Grid Height': number;
   'Grid Dimensions': string;
   'Workgroup Size': number;
-  'Workgroups Per Step': number;
   'Prev Step': StepType;
   'Next Step': StepType;
   executeStep: boolean;
-  'Execute Sort Step': () => void;
   'Log Elements': () => void;
   'Auto Sort': () => void;
   'Auto Sort Speed': number;
-  'Step Time': string;
-  sortTime: number;
-  'Sort Time': string;
-  'Average Sort Time': string;
 }
 
 const canvas = document.querySelector('canvas') as HTMLCanvasElement;
 const gui = new GUI();
 
+const gpuNavigator = navigator.gpu;
+
 const adapter = await navigator.gpu?.requestAdapter({
   featureLevel: 'compatibility',
 });
 quitIfAdapterNotAvailable(adapter);
+
+const linearIndexingAvailable =
+  gpuNavigator.wgslLanguageFeatures.has('linear-indexing');
 
 const timestampQueryAvailable = adapter.features.has('timestamp-query');
 const subgroupsAvailable = adapter.features.has('subgroups');
@@ -82,23 +69,6 @@ context.configure({
 });
 
 const maxInvocationsX = device.limits.maxComputeWorkgroupSizeX;
-
-let querySet: GPUQuerySet;
-let timestampQueryResolveBuffer: GPUBuffer;
-let timestampQueryResultBuffer: GPUBuffer;
-if (timestampQueryAvailable) {
-  querySet = device.createQuerySet({ type: 'timestamp', count: 2 });
-  timestampQueryResolveBuffer = device.createBuffer({
-    // 2 timestamps * BigInt size for nanoseconds
-    size: 2 * BigInt64Array.BYTES_PER_ELEMENT,
-    usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
-  });
-  timestampQueryResultBuffer = device.createBuffer({
-    // 2 timestamps * BigInt size for nanoseconds
-    size: 2 * BigInt64Array.BYTES_PER_ELEMENT,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-  });
-}
 
 const totalElementOptions = [];
 const maxElements = maxInvocationsX * 32;
@@ -138,12 +108,6 @@ const settings: SettingsInterface = {
   // ANIMATION LOOP AND FUNCTION SETTINGS
   // A flag that designates whether we will dispatch a workload this frame.
   executeStep: false,
-  // A function that randomizes the values of each element.
-  // When called, all relevant values within the settings object are reset to their defaults at the beginning of a sort with n elements.
-  // A function that manually executes a single step of the bitonic sort.
-  'Execute Sort Step': () => {
-    return;
-  },
   // A function that logs the values of each element as an array to the browser's console.
   'Log Elements': () => {
     return;
@@ -153,42 +117,33 @@ const settings: SettingsInterface = {
     return;
   },
   // The speed at which each step of the bitonic sort will be executed after 'Auto Sort' has been called.
-  'Auto Sort Speed': 50,
-
-  // TIMESTAMP SETTINGS
-  // Total taken to colletively execute each step of the complete bitonic sort, represented in milliseconds.
-  'Sort Time': '0ms',
-  sortTime: 0,
-  // Average time taken to complete a bitonic sort with the current combination of n 'Total Elements' and x 'Size Limit'
-  'Average Sort Time': '0ms',
-  numPrefixSums: 0,
-  averageTime: 0,
+  'Auto Sort Speed': 500,
 };
 
-// Initialize initial elements array
-let elements = new Uint32Array(
-  Array.from({ length: settings['Total Elements'] }, (_, i) => i)
-);
+const TOTAL_ELEMENTS = settings['Total Elements'];
+const elementsBufferSize = Uint32Array.BYTES_PER_ELEMENT * TOTAL_ELEMENTS;
 
-// Initialize elementsBuffer and elementsStagingBuffer
-const elementsBufferSize =
-  Float32Array.BYTES_PER_ELEMENT * totalElementOptions[0];
-// Initialize input, output, staging buffers
-const elementsInputBuffer = device.createBuffer({
+let elements = new Uint32Array(TOTAL_ELEMENTS).fill(1);
+
+const inputVecBuffer = device.createBuffer({
+  label: 'PrefixSum.inputVecBuffer',
   size: elementsBufferSize,
   usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
 });
-const elementsOutputBuffer = device.createBuffer({
+const outputBuffer = device.createBuffer({
+  label: 'PrefixSum.outputBuffer',
   size: elementsBufferSize,
   usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
 });
-const elementsStagingBuffer = device.createBuffer({
+const outputStagingBuffer = device.createBuffer({
+  label: 'PrefixSum.outputStagingBuffer',
   size: elementsBufferSize,
   usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
 });
 
 const displayUniformsBuffer = device.createBuffer({
-  size: Float16Array.BYTES_PER_ELEMENT * 2,
+  label: 'PrefixSum.displayUniformsBuffer',
+  size: 2 * Float32Array.BYTES_PER_ELEMENT,
   usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
 });
 
@@ -218,11 +173,11 @@ const displayBindGroup = device.createBindGroup({
   entries: [
     {
       binding: 0,
-      resource: elementsInputBuffer,
+      resource: { buffer: outputBuffer },
     },
     {
       binding: 1,
-      resource: displayUniformsBuffer,
+      resource: { buffer: displayUniformsBuffer },
     },
   ],
 });
@@ -249,18 +204,17 @@ const prefixSumDisplayRenderer = new PrefixSumDisplayRenderer({
   label: 'PrefixSum',
 });
 
+device.queue.writeBuffer(inputVecBuffer, 0, elements);
+
+const prefixSum = new PrefixSum(
+  device,
+  linearIndexingAvailable,
+  inputVecBuffer,
+  outputBuffer,
+  elements
+);
+
 const resetExecutionInformation = () => {
-  // The workgroup size is either elements / 2 or Size Limit
-  workgroupSizeController.setValue(
-    Math.min(settings['Total Elements'] / 2, settings['Size Limit'])
-  );
-
-  // Dispatch a workgroup for every (Size Limit * 2) elements
-  const workgroupsPerStep =
-    (settings['Total Elements'] - 1) / (settings['Size Limit'] * 2);
-
-  workgroupsPerStepController.setValue(Math.ceil(workgroupsPerStep));
-
   // Get new width and height of screen display in cells
   const newCellWidth =
     Math.sqrt(settings['Total Elements']) % 2 === 0
@@ -312,43 +266,15 @@ computeResourcesFolder
   .onChange(() => {
     endSortInterval();
     resizeElementArray();
-    // Create new config key for current element + size limit configuration
-    // const currConfigKey = `${settings['Total Elements']} ${settings['Size Limit']}`;
-    // If configKey doesn't exist in the map, create it.
-    /* if (!settings.configToCompleteSwapsMap[currConfigKey]) {
-          settings.configToCompleteSwapsMap[currConfigKey] = {
-            sorts: 0,
-            time: 0,
-          };
-        } */
-    // settings.configKey = currConfigKey;
-    //resetTimeInfo();
   });
-const workgroupSizeController = computeResourcesFolder.add(
-  settings,
-  'Workgroup Size'
-);
-const workgroupsPerStepController = computeResourcesFolder.add(
-  settings,
-  'Workgroups Per Step'
-);
 
 computeResourcesFolder.open();
 
 // Folder with functions that control the execution of the sort
 const controlFolder = gui.addFolder('Sort Controls');
-controlFolder.add(settings, 'Execute Sort Step').onChange(() => {
-  // Size Limit locked upon sort
-  endSortInterval();
-  settings.executeStep = true;
-});
 controlFolder
   .add(settings, 'Log Elements')
   .onChange(() => console.log(elements));
-controlFolder.add(settings, 'Auto Sort').onChange(() => {
-  // Invocation Limit locked upon sort
-  startSortInterval();
-});
 controlFolder.add(settings, 'Auto Sort Speed', 50, 1000).step(50);
 controlFolder.open();
 
@@ -367,14 +293,6 @@ const nextStepController = executionInformationFolder.add(
   settings,
   'Next Step'
 );
-// Timestamp information
-const timestampFolder = gui.addFolder('Timestamp Info');
-const stepTimeController = timestampFolder.add(settings, 'Step Time');
-const sortTimeController = timestampFolder.add(settings, 'Sort Time');
-const averageSortTimeController = timestampFolder.add(
-  settings,
-  'Average Sort Time'
-);
 
 // Adjust styles of Function List Elements within GUI
 const liFunctionElements = document.getElementsByClassName('cr function');
@@ -387,165 +305,62 @@ for (let i = 0; i < liFunctionElements.length; i++) {
   ).style.position = 'absolute';
 }
 
-// Mouse listener that determines values of hoveredCell and swappedCell
-canvas.addEventListener('mousemove', (event) => {
-  const currWidth = canvas.getBoundingClientRect().width;
-  const currHeight = canvas.getBoundingClientRect().height;
-  const cellSize: [number, number] = [
-    currWidth / settings['Grid Width'],
-    currHeight / settings['Grid Height'],
-  ];
-  const xIndex = Math.floor(event.offsetX / cellSize[0]);
-  const yIndex =
-    settings['Grid Height'] - 1 - Math.floor(event.offsetY / cellSize[1]);
-  settings['Hovered Cell'] = yIndex * settings['Grid Width'] + xIndex;
-});
-
 // Deactivate interaction with select GUI elements
-workgroupsPerStepController.domElement.style.pointerEvents = 'none';
-workgroupSizeController.domElement.style.pointerEvents = 'none';
 gridDimensionsController.domElement.style.pointerEvents = 'none';
-stepTimeController.domElement.style.pointerEvents = 'none';
-sortTimeController.domElement.style.pointerEvents = 'none';
-averageSortTimeController.domElement.style.pointerEvents = 'none';
 gui.width = 325;
 
 startSortInterval();
 
 async function frame() {
-  // Write elements buffer
   device.queue.writeBuffer(
-    elementsInputBuffer,
+    displayUniformsBuffer,
     0,
-    elements.buffer,
-    elements.byteOffset,
-    elements.byteLength
+    new Float32Array([settings['Grid Width'], settings['Grid Height']])
   );
-
-  const dims = new Float32Array([
-    settings['Grid Width'],
-    settings['Grid Height'],
-  ]);
-  const stepDetails = new Uint32Array([
-    StepEnum[settings['Next Step']],
-    settings['Next Swap Span'],
-  ]);
-  device.queue.writeBuffer(
-    computeUniformsBuffer,
-    0,
-    dims.buffer,
-    dims.byteOffset,
-    dims.byteLength
-  );
-
-  device.queue.writeBuffer(computeUniformsBuffer, 8, stepDetails);
 
   renderPassDescriptor.colorAttachments[0].view = context
     .getCurrentTexture()
     .createView();
 
   const commandEncoder = device.createCommandEncoder();
-  prefixSumDisplayRenderer.startRun(commandEncoder);
+
+  let didPrefixSum = false;
   if (settings.executeStep) {
-    let computePassEncoder: GPUComputePassEncoder;
-    if (timestampQueryAvailable) {
-      computePassEncoder = commandEncoder.beginComputePass({
-        timestampWrites: {
-          querySet,
-          beginningOfPassWriteIndex: 0,
-          endOfPassWriteIndex: 1,
-        },
-      });
-    } else {
-      computePassEncoder = commandEncoder.beginComputePass();
-    }
-    computePassEncoder.setPipeline(computePipeline);
-    computePassEncoder.setBindGroup(0, computeBGCluster.bindGroups[0]);
-    computePassEncoder.dispatchWorkgroups(settings['Workgroups Per Step']);
-    computePassEncoder.end();
-    // Resolve time passed in between beginning and end of computePass
-    if (timestampQueryAvailable) {
-      commandEncoder.resolveQuerySet(
-        querySet,
-        0,
-        2,
-        timestampQueryResolveBuffer,
-        0
-      );
+    if (settings['Next Step'] === 'PREFIX_SUM') {
+      prefixSum.run(commandEncoder);
       commandEncoder.copyBufferToBuffer(
-        timestampQueryResolveBuffer,
-        timestampQueryResultBuffer
+        outputBuffer,
+        0,
+        outputStagingBuffer,
+        0,
+        elementsBufferSize
       );
+      didPrefixSum = true;
+    } else {
+      // RESET: refill input with 1s
+      elements = new Uint32Array(TOTAL_ELEMENTS).fill(1);
+      device.queue.writeBuffer(inputVecBuffer, 0, elements);
     }
 
     prevStepController.setValue(settings['Next Step']);
     nextStepController.setValue(
       settings['Next Step'] === 'PREFIX_SUM' ? 'RESET' : 'PREFIX_SUM'
     );
-
-    // Copy GPU accessible buffers to CPU accessible buffers
-    commandEncoder.copyBufferToBuffer(
-      elementsOutputBuffer,
-      elementsStagingBuffer
-    );
   }
+
+  prefixSumDisplayRenderer.startRun(commandEncoder);
   device.queue.submit([commandEncoder.finish()]);
 
-  if (settings.executeStep) {
-    // Copy GPU element data to CPU
-    await elementsStagingBuffer.mapAsync(
-      GPUMapMode.READ,
+  if (didPrefixSum) {
+    await outputStagingBuffer.mapAsync(GPUMapMode.READ, 0, elementsBufferSize);
+    const copyBuffer = outputStagingBuffer.getMappedRange(
       0,
       elementsBufferSize
     );
-    const copyElementsBuffer = elementsStagingBuffer.getMappedRange(
-      0,
-      elementsBufferSize
-    );
-
-    const elementsData = copyElementsBuffer.slice(
-      0,
-      Uint32Array.BYTES_PER_ELEMENT * settings['Total Elements']
-    );
-    // Extract data
-    const elementsOutput = new Uint32Array(elementsData);
-    elementsStagingBuffer.unmap();
-    // Elements output becomes elements input, swap accumulate
-    elements = elementsOutput;
-
-    // Handle timestamp query stuff
-    if (timestampQueryAvailable) {
-      // Copy timestamp query result buffer data to CPU
-      await timestampQueryResultBuffer.mapAsync(
-        GPUMapMode.READ,
-        0,
-        2 * BigInt64Array.BYTES_PER_ELEMENT
-      );
-      const copyTimestampResult = new BigInt64Array(
-        timestampQueryResultBuffer.getMappedRange()
-      );
-      // Calculate new step, sort, and average sort times
-      const newStepTime =
-        Number(copyTimestampResult[1] - copyTimestampResult[0]) / 1000000;
-      // We accumulate here but it should be a new step
-      const newSortTime = settings.sortTime + newStepTime;
-      // Apply calculated times to settings object as both number and 'ms' appended string
-      settings.sortTime = newSortTime;
-      sortTimeController.setValue(`${newSortTime.toFixed(5)}ms`);
-      // Calculate new average sort upon end of final execution step of a full bitonic sort.
-      /* settings.configToCompleteSwapsMap[settings.configKey].time +=
-              newSortTime;
-            const averageSortTime =
-              settings.configToCompleteSwapsMap[settings.configKey].time /
-              settings.configToCompleteSwapsMap[settings.configKey].sorts;
-            averageSortTimeController.setValue(
-              `${averageSortTime.toFixed(5)}ms`
-            );
-          } */
-      timestampQueryResultBuffer.unmap();
-      // Get correct range of data from CPU copy of GPU Data
-    }
+    elements = new Uint32Array(copyBuffer.slice(0));
+    outputStagingBuffer.unmap();
   }
+
   settings.executeStep = false;
   requestAnimationFrame(frame);
 }

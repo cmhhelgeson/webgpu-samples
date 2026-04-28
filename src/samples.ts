@@ -116,6 +116,7 @@ export const pageCategories: PageCategory[] = [
       computeBoids,
       gameOfLife,
       bitonicSort,
+      prefixSum,
     },
   },
 

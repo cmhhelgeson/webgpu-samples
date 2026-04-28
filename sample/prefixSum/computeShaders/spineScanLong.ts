@@ -1,27 +1,33 @@
-var<private> instanceIndex : u32;
+import { constructBuiltinDeclarations } from './utils';
 
-var<workgroup> WorkgroupArray_898: array< u32, 64 >;
+export const SpineScanLongCompute = (
+  workgroupSize: number,
+  linearIndexingAvailable: boolean
+): string => {
+  const builtinDeclarations = constructBuiltinDeclarations(
+    linearIndexingAvailable
+  );
+
+  return /* wgsl */ `
+${!linearIndexingAvailable ? 'var<private> instanceIndex : u32;' : ''}
+
+var<workgroup> WorkgroupArray_898: array< u32, ${workgroupSize / 4} >;
 
 @group( 0 ) @binding( 1 )
 var<storage, read_write> Prefix_Sum_Reduction_0 : U32ArrayStruct;
 
 @group(1) @binding(0) var<uniform> params: PrefixSumParams;
 
-@compute @workgroup_size( 256, 1, 1 )
+@compute @workgroup_size( ${workgroupSize}, 1, 1 )
 fn spineScanLong(
-    @builtin( local_invocation_index ) invocationLocalIndex : u32,
-	@builtin( subgroup_invocation_id ) invocationSubgroupIndex : u32,
-	@builtin( global_invocation_id ) globalId : vec3<u32>,
-	@builtin( workgroup_id ) workgroupId : vec3<u32>,
-	@builtin( local_invocation_id ) localId : vec3<u32>,
-	@builtin( num_workgroups ) numWorkgroups : vec3<u32>,
-	@builtin( subgroup_size ) subgroupSize : u32
+${builtinDeclarations}
 ) {
 
 	// system
-	instanceIndex = globalId.x
-		+ globalId.y * ( 256 * numWorkgroups.x )
-		+ globalId.z * ( 256 * numWorkgroups.x ) * ( 1 * numWorkgroups.y );
+	${
+    !linearIndexingAvailable &&
+    `instanceIndex = globalId.x + globalId.y * ( ${workgroupSize} * numWorkgroups.x ) + globalId.z * ( ${workgroupSize} * numWorkgroups.x ) * ( 1 * numWorkgroups.y );`
+  }
 
 	// vars
 
@@ -167,3 +173,5 @@ fn spineScanLong(
 	}
 
 }
+`;
+};

@@ -1,8 +1,18 @@
+import { constructBuiltinDeclarations } from './utils';
+
+export const DownSweepCompute = (
+  workgroupSize: number,
+  linearIndexingAvailable: boolean
+): string => {
+  const builtinDeclarations = constructBuiltinDeclarations(
+    linearIndexingAvailable
+  );
+  return /* wgsl */ `
 override OUTPUT_INDEX_OFFSET: u32 = 0u;
 
-var<private> instanceIndex : u32;
+${!linearIndexingAvailable ? 'var<private> instanceIndex : u32;' : ''}
 
-var<workgroup> WorkgroupArray_898: array< u32, 64 >;
+var<workgroup> WorkgroupArray_898: array< u32, ${workgroupSize / 4} >;
 
 @group( 0 ) @binding(0)
 var<storage, read_write> Prefix_Sum_Input_Vec_0 : Vec4ArrayStruct;
@@ -21,20 +31,15 @@ var<storage, read_write> prefix_sum_output : U32ArrayStruct;
 
 @group(1) @binding(0) var<uniform> params: PrefixSumParams;
 
-@compute @workgroup_size( 256, 1, 1 )
+@compute @workgroup_size( ${workgroupSize}, 1, 1 )
 fn downSweep(
-    @builtin( local_invocation_index ) invocationLocalIndex : u32,
-	@builtin( subgroup_invocation_id ) invocationSubgroupIndex : u32,
-	@builtin( global_invocation_id ) globalId : vec3<u32>,
-	@builtin( workgroup_id ) workgroupId : vec3<u32>,
-	@builtin( local_invocation_id ) localId : vec3<u32>,
-	@builtin( num_workgroups ) numWorkgroups : vec3<u32>,
-	@builtin( subgroup_size ) subgroupSize : u32
+${builtinDeclarations}
 ) {
 
-	instanceIndex = globalId.x
-		+ globalId.y * ( 256 * numWorkgroups.x )
-		+ globalId.z * ( 256 * numWorkgroups.x ) * ( 1 * numWorkgroups.y );
+	${
+    !linearIndexingAvailable &&
+    `instanceIndex = globalId.x + globalId.y * ( ${workgroupSize} * numWorkgroups.x ) + globalId.z * ( ${workgroupSize} * numWorkgroups.x ) * ( 1 * numWorkgroups.y );`
+  }
 
     // TODO: Investigate replacing with subgroup_id
 	var invocationSubgroupMetaIndex : u32;
@@ -233,7 +238,9 @@ fn downSweep(
 	// Zero the element at [OUTPUT_INDEX_OFFSET - 1] so sort.wgsl can use it as the
 	// exclusive-prefix-sum starting offset for cell 0 on the next tick (sort will have
 	// incremented it to counts[0] during the previous tick).
-	if ( OUTPUT_INDEX_OFFSET > 0u && workgroupId.x == 0u && invocationLocalIndex == 0u ) {
-		prefix_sum_output.value[ OUTPUT_INDEX_OFFSET - 1u ] = 0u;
-	}
+	// if ( OUTPUT_INDEX_OFFSET > 0u && workgroupId.x == 0u && invocationLocalIndex == 0u ) {
+		// prefix_sum_output.value[ OUTPUT_INDEX_OFFSET - 1u ] = 0u;
+	// }
 }
+`;
+};
