@@ -69,12 +69,9 @@ context.configure({
 });
 
 const maxInvocationsX = device.limits.maxComputeWorkgroupSizeX;
+console.log(maxInvocationsX);
 
-const totalElementOptions = [];
-const maxElements = maxInvocationsX * 32;
-for (let i = maxElements; i >= 4; i /= 2) {
-  totalElementOptions.push(i);
-}
+const maxElements = 1048576;
 
 const defaultGridWidth =
   Math.sqrt(maxElements) % 2 === 0
@@ -133,7 +130,8 @@ const inputVecBuffer = device.createBuffer({
 const outputBuffer = device.createBuffer({
   label: 'PrefixSum.outputBuffer',
   size: elementsBufferSize,
-  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+  usage:
+    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
 });
 const outputStagingBuffer = device.createBuffer({
   label: 'PrefixSum.outputStagingBuffer',
@@ -214,38 +212,7 @@ const prefixSum = new PrefixSum(
   elements
 );
 
-const resetExecutionInformation = () => {
-  // Get new width and height of screen display in cells
-  const newCellWidth =
-    Math.sqrt(settings['Total Elements']) % 2 === 0
-      ? Math.floor(Math.sqrt(settings['Total Elements']))
-      : Math.floor(Math.sqrt(settings['Total Elements'] / 2));
-  const newCellHeight = settings['Total Elements'] / newCellWidth;
-  settings['Grid Width'] = newCellWidth;
-  settings['Grid Height'] = newCellHeight;
-  gridDimensionsController.setValue(`${newCellWidth}x${newCellHeight}`);
-
-  // Set prevStep to None (restart) and next step to FLIP
-  prevStepController.setValue('RESET');
-  nextStepController.setValue('PREFIX_SUM');
-};
-
-const resizeElementArray = () => {
-  // Recreate elements array with new length
-  elements = new Uint32Array(
-    Array.from({ length: settings['Total Elements'] }, (_, i) => i)
-  );
-
-  resetExecutionInformation();
-};
-
 let autoSortIntervalID: ReturnType<typeof setInterval> | null = null;
-const endSortInterval = () => {
-  if (autoSortIntervalID !== null) {
-    clearInterval(autoSortIntervalID);
-    autoSortIntervalID = null;
-  }
-};
 const startSortInterval = () => {
   const currentIntervalSpeed = settings['Auto Sort Speed'];
   autoSortIntervalID = setInterval(() => {
@@ -258,29 +225,16 @@ const startSortInterval = () => {
   }, settings['Auto Sort Speed']);
 };
 
-// At top level, information about resources used to execute the compute shader
-// i.e elements sorted, invocations per workgroup, and workgroups dispatched
-const computeResourcesFolder = gui.addFolder('Compute Resources');
-computeResourcesFolder
-  .add(settings, 'Total Elements', totalElementOptions)
-  .onChange(() => {
-    endSortInterval();
-    resizeElementArray();
-  });
-
-computeResourcesFolder.open();
-
 // Folder with functions that control the execution of the sort
 const controlFolder = gui.addFolder('Sort Controls');
 controlFolder
   .add(settings, 'Log Elements')
   .onChange(() => console.log(elements));
-controlFolder.add(settings, 'Auto Sort Speed', 50, 1000).step(50);
+controlFolder
+  .add(settings, 'Auto Sort Speed', 50, 1000)
+  .step(50)
+  .name('Auto Step Speed');
 controlFolder.open();
-
-// Information about grid display
-const gridFolder = gui.addFolder('Grid Information');
-const gridDimensionsController = gridFolder.add(settings, 'Grid Dimensions');
 
 // Additional Information about the execution state of the sort
 const executionInformationFolder = gui.addFolder('Execution Information');
@@ -304,10 +258,6 @@ for (let i = 0; i < liFunctionElements.length; i++) {
     liFunctionElements[i].children[0].children[1] as HTMLElement
   ).style.position = 'absolute';
 }
-
-// Deactivate interaction with select GUI elements
-gridDimensionsController.domElement.style.pointerEvents = 'none';
-gui.width = 325;
 
 startSortInterval();
 
@@ -337,9 +287,11 @@ async function frame() {
       );
       didPrefixSum = true;
     } else {
-      // RESET: refill input with 1s
       elements = new Uint32Array(TOTAL_ELEMENTS).fill(1);
-      device.queue.writeBuffer(inputVecBuffer, 0, elements);
+      // Just overwrite outputBuffer
+      // inputVecBuffer stays the same throughout execution but the outputBuffer gets
+      // the result of the prefix sum of inputVecBuffer
+      device.queue.writeBuffer(outputBuffer, 0, elements);
     }
 
     prevStepController.setValue(settings['Next Step']);
@@ -351,6 +303,7 @@ async function frame() {
   prefixSumDisplayRenderer.startRun(commandEncoder);
   device.queue.submit([commandEncoder.finish()]);
 
+  // Need to overwite elements for log after prefix sum
   if (didPrefixSum) {
     await outputStagingBuffer.mapAsync(GPUMapMode.READ, 0, elementsBufferSize);
     const copyBuffer = outputStagingBuffer.getMappedRange(

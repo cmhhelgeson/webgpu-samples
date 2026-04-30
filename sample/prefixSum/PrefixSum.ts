@@ -323,38 +323,49 @@ export class PrefixSum {
     const prefixSumPipelinesManifest = [
       {
         name: 'reduce',
-        code: ReduceCompute(this.workgroupSize),
+        code: ReduceCompute(this.workgroupSize, linearIndexingAvailable),
         layouts: [this.dataBindGroupLayout, this.paramsBindGroupLayout],
       },
       {
         name: 'spineScanShort',
-        code: SpineScanShortCompute(this.workgroupSize),
+        code: SpineScanShortCompute(
+          this.workgroupSize,
+          linearIndexingAvailable
+        ),
         layouts: [this.dataBindGroupLayout],
       },
       {
         name: 'spineScanLong',
-        code: SpineScanLongCompute(this.workgroupSize),
+        code: SpineScanLongCompute(this.workgroupSize, linearIndexingAvailable),
         layouts: [this.dataBindGroupLayout, this.paramsBindGroupLayout],
       },
       {
         name: 'downSweep',
-        code: DownSweepCompute(this.workgroupSize),
+        code: DownSweepCompute(this.workgroupSize, linearIndexingAvailable),
         layouts: [this.dataBindGroupLayout, this.paramsBindGroupLayout],
-        computeConstants: {},
+        computeConstants: {
+          OUTPUT_INDEX_OFFSET: 0,
+        },
       },
     ];
 
     for (const manifest of prefixSumPipelinesManifest) {
+      const computeProgram: GPUProgrammableStage = {
+        module: this.device.createShaderModule({
+          code: prefixSumCommonsWGSL + manifest.code,
+        }),
+      };
+
+      if (manifest.computeConstants) {
+        computeProgram.constants = manifest.computeConstants;
+      }
+
       this.pipelines[manifest.name] = device.createComputePipeline({
         label: `computePipeline.prefixSum_${manifest.name}`,
         layout: device.createPipelineLayout({
           bindGroupLayouts: manifest.layouts,
         }),
-        compute: {
-          module: device.createShaderModule({
-            code: prefixSumCommonsWGSL + manifest.code,
-          }),
-        },
+        compute: computeProgram,
       });
     }
 
