@@ -235,12 +235,16 @@ ${builtinDeclarations}
 		}
 	}
 
+	workgroupBarrier();
+
 	// Zero the element at [OUTPUT_INDEX_OFFSET - 1] so sort.wgsl can use it as the
 	// exclusive-prefix-sum starting offset for cell 0 on the next tick (sort will have
 	// incremented it to counts[0] during the previous tick).
-	// if ( OUTPUT_INDEX_OFFSET > 0u && workgroupId.x == 0u && invocationLocalIndex == 0u ) {
-		// prefix_sum_output.value[ OUTPUT_INDEX_OFFSET - 1u ] = 0u;
-	// }
+	if ( OUTPUT_INDEX_OFFSET > 0u && workgroupId.x == 0u && invocationLocalIndex == 0u ) {
+		for ( var x : u32 = 0u; x < OUTPUT_INDEX_OFFSET; x ++ ) {
+			prefix_sum_output.value[ x ] = 0u;
+		}
+	}
 }
 `;
 };

@@ -9,9 +9,9 @@ export default {
     { path: '../../shaders/fullscreenTexturedQuad.wgsl' },
     { path: './prefixSumDisplay.frag.wgsl' },
     { path: './computeShaders/commons.wgsl' },
-    { path: './computeShaders/reduce.wgsl' },
-    { path: './computeShaders/spineScanShort.wgsl' },
-    { path: './computeShaders/spineScanLong.wgsl' },
-    { path: './computeShaders/downsweep.wgsl' },
+    { path: './computeShaders/reduce.ts' },
+    { path: './computeShaders/spineScanShort.ts' },
+    { path: './computeShaders/spineScanLong.ts' },
+    { path: './computeShaders/downsweep.ts' },
   ],
 };

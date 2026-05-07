@@ -68,15 +68,6 @@ const getTypeFromTypedArray = (
  */
 
 /**
- * Compute functions needed to execute a reduce-then-scan prefix sum`.
- *
- * @typedef {Object} PrefixSumComputeFunctions
- * @property {ComputeNode} reduceFn - A compute shader that executes the reduce step of a reduce-then-scan prefix sum.
- * @property {ComputeNode} spineScanFn - A compute shader that executes the spine scan step of a reduce-then-scan prefix sum.
- * @property {ComputeNode} downsweepFn - A compute shader that executes the downsweep step of a reduce-then-scan prefix sum.
- */
-
-/**
  * Utility nodes used in multiple shaders across the reduce-then-scan prefix sum`.
  *
  * @typedef {Object} PrefixSumUtilityNodes
@@ -344,10 +335,12 @@ export class PrefixSum {
         code: DownSweepCompute(this.workgroupSize, linearIndexingAvailable),
         layouts: [this.dataBindGroupLayout, this.paramsBindGroupLayout],
         computeConstants: {
-          OUTPUT_INDEX_OFFSET: 0,
+          OUTPUT_INDEX_OFFSET: 2,
         },
       },
     ];
+
+    console.log(DownSweepCompute(this.workgroupSize, linearIndexingAvailable));
 
     for (const manifest of prefixSumPipelinesManifest) {
       const computeProgram: GPUProgrammableStage = {
